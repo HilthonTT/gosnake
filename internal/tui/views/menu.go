@@ -28,11 +28,6 @@ var (
 			Foreground(lipgloss.Color("#006400")).
 			Italic(true)
 
-	formBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#00FF41")).
-			Padding(1, 3)
-
 	hintStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#444444")).
 			Italic(true)
