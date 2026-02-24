@@ -119,6 +119,17 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 		}
 		m.child = child
 
+	case tui.ModeLeaderboard:
+		leaderboardIn, ok := switchIn.(*tui.LeaderboardInput)
+		if !ok {
+			return fmt.Errorf("switchIn is not a LeaderboardInput: %w", charmutils.ErrInvalidTypeAssertion)
+		}
+		child, err := views.NewLeaderboardModel(leaderboardIn, m.db)
+		if err != nil {
+			return fmt.Errorf("creating leaderboard model: %w", err)
+		}
+		m.child = child
+
 	default:
 		return errors.New("invalid mode")
 	}

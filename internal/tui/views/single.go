@@ -166,8 +166,18 @@ func (m *SingleModel) dependenciesUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 func (m *SingleModel) gameOverUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		if key.Matches(msg, m.keys.Quit) {
-			// TODO: save score then switch to leaderboard / menu mode.
-			return m, tea.Quit
+
+			newEntry := &data.LeaderboardEntry{
+				Name:      m.username,
+				Score:     m.game.Score(),
+				Level:     m.game.Level(),
+				CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+			}
+
+			return m, tui.SwitchModeCmd(
+				tui.ModeLeaderboard,
+				tui.NewLeaderboardInput(tui.WithNewEntry(newEntry)),
+			)
 		}
 	}
 	return m, nil

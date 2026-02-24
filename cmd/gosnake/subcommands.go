@@ -25,6 +25,12 @@ func (c *PlayCmd) Run(globals *GlobalVars) error {
 	return launchStarter(globals, tui.ModeGame, tui.NewSingleInput(tui.ModeGame, c.Level, c.Name))
 }
 
+type LeaderboardCmd struct{}
+
+func (c *LeaderboardCmd) Run(globals *GlobalVars) error {
+	return launchStarter(globals, tui.ModeLeaderboard, tui.NewLeaderboardInput())
+}
+
 func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.SwitchModeInput) error {
 	db, err := data.NewDB(globals.DB)
 	if err != nil {

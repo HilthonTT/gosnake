@@ -134,7 +134,8 @@ func (g *Game) Tick() {
 }
 
 func (g *Game) SaveScore(name string) error {
-	return g.repo.Save(name, g.scoring.Total(), g.scoring.Level())
+	_, err := g.repo.Save(name, g.scoring.Total(), g.scoring.Level())
+	return err
 }
 
 func (g *Game) triggerGameOver() {
@@ -150,7 +151,7 @@ func (g *Game) render() {
 		}
 	}
 
-	// Draw fool
+	// Draw food
 	if g.food != nil {
 		g.matrix.Set(*g.food, 'F')
 	}

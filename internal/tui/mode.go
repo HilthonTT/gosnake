@@ -1,6 +1,9 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"github.com/HilthonTT/gosnake/internal/data"
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 type SwitchModeMsg struct {
 	Target Mode
@@ -61,3 +64,25 @@ func NewSingleInput(mode Mode, level int, username string) *SingleInput {
 }
 
 func (in *SingleInput) isSwitchModeInput() {}
+
+type LeaderboardInput struct {
+	NewEntry *data.LeaderboardEntry
+}
+
+func NewLeaderboardInput(opts ...func(input *LeaderboardInput)) *LeaderboardInput {
+	in := &LeaderboardInput{}
+
+	for _, opt := range opts {
+		opt(in)
+	}
+
+	return in
+}
+
+func (in *LeaderboardInput) isSwitchModeInput() {}
+
+func WithNewEntry(entry *data.LeaderboardEntry) func(input *LeaderboardInput) {
+	return func(input *LeaderboardInput) {
+		input.NewEntry = entry
+	}
+}

@@ -23,10 +23,10 @@ func NewDB(dataSourceName string) (*sql.DB, error) {
 func EnsureTableExists(db *sql.DB) error {
 	const query = `
 		CREATE TABLE IF NOT EXISTS leaderboard (
-			id        INTEGER PRIMARY KEY AUTOINCREMENT,
-			name      TEXT    NOT NULL,
-			score     INTEGER NOT NULL DEFAULT 0,
-			level     INTEGER NOT NULL DEFAULT 1,
+			id         INTEGER  PRIMARY KEY AUTOINCREMENT,
+			name       TEXT     NOT NULL,
+			score      INTEGER  NOT NULL DEFAULT 0,
+			level      INTEGER  NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 	`
