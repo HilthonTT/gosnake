@@ -8,7 +8,9 @@ import (
 type CLI struct {
 	GlobalVars
 
-	Menu MenuCmd `cmd:"" help:"Start in the menu" default:"1"`
+	Menu        MenuCmd        `cmd:"" help:"Start in the menu" default:"1"`
+	Play        PlayCmd        `cmd:"" help:"Start in the game"`
+	Leaderboard LeaderboardCmd `cmd:"" help:"Start on the leaderboard"`
 }
 
 type GlobalVars struct {
