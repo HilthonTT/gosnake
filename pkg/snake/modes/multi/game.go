@@ -44,10 +44,7 @@ type Game struct {
 // NewGame initialises a fresh game for the given player names.
 // len(names) must be between 2 and MaxPlayers.
 func NewGame(names []string) *Game {
-	n := len(names)
-	if n > MaxPlayers {
-		n = MaxPlayers
-	}
+	n := min(len(names), MaxPlayers)
 
 	// Fixed spread so snakes start far apart and face inward.
 	starts := [MaxPlayers]snake.Point{
