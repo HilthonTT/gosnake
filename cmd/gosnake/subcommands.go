@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/starter"
+	"github.com/HilthonTT/gosnake/server"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -63,5 +70,50 @@ func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.Switc
 		return fmt.Errorf("starter model exited with an error: %w", err)
 	}
 
+	return nil
+}
+
+type ServeCmd struct {
+	Key  string `help:"Path to SSH host key file" default:"gosnake_server" env:"GOSNAKE_KEY"`
+	Host string `help:"Host address to bind to (empty = all interfaces)" default:"" env:"GOSNAKE_HOST"`
+	Port int    `help:"TCP port to listen on" default:"2222" env:"GOSNAKE_PORT"`
+}
+
+func (c *ServeCmd) Run(_ *GlobalVars) error {
+	srv, err := server.NewServer(c.Key, c.Host, c.Port)
+	if err != nil {
+		return fmt.Errorf("creating server: %w", err)
+	}
+
+	log.Printf("GoSnake multiplayer server starting on %s:%d", c.Host, c.Port)
+	log.Printf("Players connect with: ssh <name>@<host> -p %d -t <room-id>", c.Port)
+
+	// Start serving in the background.
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Start(); err != nil {
+			errCh <- err
+		}
+	}()
+
+	// Block until SIGINT / SIGTERM or a fatal server error.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-quit:
+		log.Printf("Received %s — shutting down...", sig)
+	case err := <-errCh:
+		return fmt.Errorf("server error: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+
+	log.Println("Server stopped.")
 	return nil
 }

@@ -459,3 +459,5 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+cmd/gosnake/gosnake_server
+cmd/gosnake/gosnake_server.pub

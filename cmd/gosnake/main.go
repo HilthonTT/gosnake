@@ -11,6 +11,7 @@ type CLI struct {
 	Menu        MenuCmd        `cmd:"" help:"Start in the menu" default:"1"`
 	Play        PlayCmd        `cmd:"" help:"Start in the game"`
 	Leaderboard LeaderboardCmd `cmd:"" help:"Start on the leaderboard"`
+	Serve       ServeCmd       `cmd:"" help:"Start a multiplayer SSH server"`
 }
 
 type GlobalVars struct {
