@@ -77,24 +77,16 @@ func (r *Room) Close() {
 
 // AddPlayer assigns a session to a player or observer slot and wires it up.
 func (r *Room) AddPlayer(s ssh.Session) (*Player, error) {
-	log.Println("Calling public key")
-
 	k := s.PublicKey()
-
-	log.Println("After calling public key")
 	if k == nil {
-		log.Printf("[AddPlayer] No public Key")
 		return nil, fmt.Errorf("no public key — re-run with: ssh -i <key> ...")
 	}
 	pub := PublicKey{key: k}
 
 	r.mu.Lock()
 
-	log.Println("Calling lock")
-
 	if _, ok := r.players[pub.String()]; ok {
 		r.mu.Unlock()
-		log.Printf("[AddPlayer] Already connected")
 		return nil, fmt.Errorf("you are already connected to this room")
 	}
 
@@ -112,31 +104,13 @@ func (r *Room) AddPlayer(s ssh.Session) (*Player, error) {
 		playerIndex: idx,
 	}
 
-	log.Println("After indexing")
-
 	p.game = newSharedMultiGame(p, r.sync)
 
-	log.Println("After new shared game")
-
-	ptyInfo, wchan, active := s.Pty()
-	log.Printf("[AddPlayer] user=%s active=%v pty=%dx%d playerIndex=%d",
-		s.User(), active, ptyInfo.Window.Width, ptyInfo.Window.Height, idx)
-
-	if !active {
-		log.Printf("[AddPlayer] WARNING: no active PTY for %s", s.User())
-	}
-	if ptyInfo.Window.Width == 0 || ptyInfo.Window.Height == 0 {
-		log.Printf("[AddPlayer] WARNING: zero dimensions for %s", s.User())
-	}
+	ptyInfo, wchan, _ := s.Pty()
 
 	p.game.width = ptyInfo.Window.Width
 	p.game.height = ptyInfo.Window.Height
 	p.wchan = wchan
-
-	log.Printf("[AddPlayer] model dimensions set to %dx%d for %s",
-		p.game.width, p.game.height, s.User())
-
-	log.Println("Before calling new program")
 
 	prog := tea.NewProgram(
 		p.game,
@@ -147,22 +121,19 @@ func (r *Room) AddPlayer(s ssh.Session) (*Player, error) {
 	)
 	p.program = prog
 
-	log.Println("After calling new program")
-
 	r.players[pub.String()] = p
-	log.Printf("[AddPlayer] room %s now has %d player(s)", r.id, len(r.players))
 
-	// Unlock BEFORE broadcasting. p.program.Send() blocks if the Bubble Tea
-	// program hasn't called Run() yet; holding the lock here causes a deadlock
-	// when a second player connects concurrently and also tries to AddPlayer.
-	// joinMsg := NoteMsg(fmt.Sprintf("%s joined as %s", s.User(), p.roleString()))
+	joinMsg := NoteMsg(fmt.Sprintf("%s joined as %s", s.User(), p.roleString()))
 	r.mu.Unlock()
 
-	log.Println("Unlocked lock")
-
-	// r.broadcast(joinMsg)
-
-	log.Println("After broadcast")
+	// Route through the sync channel (buffered, 128) instead of calling
+	// broadcast directly. At this point p.program.Run() hasn't been called
+	// yet, so program.Send() would block. The listen() goroutine will pick
+	// this up and fan it out once all programs are actually running.
+	select {
+	case r.sync <- joinMsg:
+	default:
+	}
 
 	return p, nil
 }
@@ -224,11 +195,12 @@ func (r *Room) broadcastState(died []int) {
 }
 
 // listen is the room's single-threaded event loop.
-
+// It owns the game object exclusively — no other goroutine touches r.game.
 func (r *Room) listen() {
 	ticker := time.NewTicker(snake.GetTickInterval(1))
 	defer ticker.Stop()
 
+	// Single timer so the idle timeout does not silently reset every loop iteration.
 	idle := time.NewTimer(idleTimeout)
 	defer idle.Stop()
 
@@ -265,7 +237,7 @@ func (r *Room) listen() {
 				r.doRestart()
 			}
 
-		//  Game tick
+		// Game tick
 		case <-ticker.C:
 			// Start the game once ≥2 players are connected.
 			if r.game == nil {

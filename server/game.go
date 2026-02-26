@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/HilthonTT/gosnake/pkg/snake"
@@ -226,12 +225,8 @@ func (m *SharedMultiGame) sendToRoom(msg tea.Msg) {
 }
 
 func (m *SharedMultiGame) View() string {
-	log.Printf("[View] player=%s width=%d height=%d hasState=%v",
-		m.player.session.User(), m.width, m.height, m.lastState != nil)
-
 	if m.lastState == nil {
 		v := m.waitingView()
-		log.Printf("[View] waitingView len=%d", len(v))
 		return v
 	}
 
@@ -329,13 +324,12 @@ func (m *SharedMultiGame) gameOverMsg(state *GameStateMsg) string {
 	}
 
 	return fmt.Sprintf(`
-  ██████╗  █████╗ ███╗   ███╗███████╗
- ██╔════╝ ██╔══██╗████╗ ████║██╔════╝
- ██║  ███╗███████║██╔████╔██║█████╗  
- ██║   ██║██╔══██║██║╚██╔╝██║██╔══╝  
- ╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗
-  ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝
-           OVER
+ ██████╗  █████╗ ███╗   ███╗███████╗     ██████╗ ██╗   ██╗███████╗██████╗ 
+██╔════╝ ██╔══██╗████╗ ████║██╔════╝    ██╔═══██╗██║   ██║██╔════╝██╔══██╗
+██║  ███╗███████║██╔████╔██║█████╗      ██║   ██║██║   ██║█████╗  ██████╔╝
+██║   ██║██╔══██║██║╚██╔╝██║██╔══╝      ██║   ██║╚██╗ ██╔╝██╔══╝  ██╔══██╗
+╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗    ╚██████╔╝ ╚████╔╝ ███████╗██║  ██║
+ ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝     ╚═════╝   ╚═══╝  ╚══════╝╚═╝  ╚═╝
 
   %s
 
