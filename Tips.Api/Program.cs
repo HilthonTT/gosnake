@@ -1,8 +1,10 @@
 using Tips.Api;
 using Tips.Api.Endpoints;
 using Tips.Api.Settings;
+using Asp.Versioning;
+using Asp.Versioning.Builder;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder
     .AddApplicationServices()
@@ -10,11 +12,26 @@ builder
     .AddCorsPolicy()
     .AddRateLimiting();
 
-var app = builder.Build();
+WebApplication app = builder.Build();
+
+ApiVersionSet apiVersionSet = app.NewApiVersionSet()
+    .HasApiVersion(new ApiVersion(1))
+    .ReportApiVersions()
+    .Build();
+
+RouteGroupBuilder versionedGroup = app
+    .MapGroup("api/v{version:apiVersion}")
+    .WithApiVersionSet(apiVersionSet);
+
+app.MapTipsEndpoints(versionedGroup);
+
+app.MapLeaderboardEndpoints(versionedGroup);
 
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
 app.UseCookiePolicy();
@@ -28,7 +45,5 @@ app.UseCors(CorsOptions.PolicyName);
 app.UseRateLimiter();
 
 app.MapHealthChecks("/health");
-
-app.MapTipsEndpoints();
 
 await app.RunAsync();

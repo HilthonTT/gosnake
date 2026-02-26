@@ -10,9 +10,12 @@ internal static class TipsStream
 {
     private static readonly TimeSpan SseRetryInterval = TimeSpan.FromSeconds(5);
 
-    public static void MapTipsEndpoints(this IEndpointRouteBuilder app)
+    public static void MapTipsEndpoints(this WebApplication _, IEndpointRouteBuilder routes)
     {
-        app.MapGet("tips", (
+        RouteGroupBuilder group = routes.MapGroup("tips")
+            .WithTags("Tips");
+
+        group.MapGet("/", (
             ITipRepository repo,
             [FromQuery] TipDifficulty? difficulty,
             [FromQuery] TipCategory? category) =>
@@ -25,7 +28,7 @@ internal static class TipsStream
         })
         .WithName("GetTips");
 
-        app.MapGet("tips/realtime", (
+        group.MapGet("/realtime", (
             BroadcastManager broadcastManager,
             TipEventBuffer eventBuffer,
             ILoggerFactory loggerFactory,

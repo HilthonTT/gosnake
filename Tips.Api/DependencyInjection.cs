@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Asp.Versioning;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using System.Threading.RateLimiting;
 using Tips.Api.Realtime;
@@ -18,9 +19,25 @@ public static class DependencyInjection
         builder.Services.AddHealthChecks();
         builder.Services.AddMetrics();
 
+        builder.Services.AddEndpointsApiExplorer();
+        builder.Services.AddSwaggerGen();
+
         builder.Services.AddSingleton<ITipRepository, InMemoryTipRepository>();
+        builder.Services.AddSingleton<ILeaderboardRepository, InMemoryLeaderboardRepository>();
+        builder.Services.AddSingleton<LeaderboardBroadcastManager>();
+        builder.Services.AddSingleton<LeaderboardEventBuffer>();
         builder.Services.AddSingleton<BroadcastManager>();
         builder.Services.AddSingleton<TipEventBuffer>();
+
+        builder.Services.AddApiVersioning(options =>
+        {
+            options.DefaultApiVersion = new ApiVersion(1);
+            options.ApiVersionReader = new UrlSegmentApiVersionReader();
+        }).AddApiExplorer(options =>
+        {
+            options.GroupNameFormat = "'v'V";
+            options.SubstituteApiVersionInUrl = true;
+        });
 
         return builder;
     }
