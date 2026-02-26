@@ -22,14 +22,19 @@ func multiMiddleware(srv *Server) wish.Middleware {
 		lipgloss.SetColorProfile(termenv.ANSI256)
 
 		return func(s ssh.Session) {
+			log.Printf("Hit 1")
+
 			_, _, active := s.Pty()
 			cmds := s.Command()
 
 			if !active || len(cmds) < 1 {
+				log.Printf("Hit 2")
 				_, _ = s.Write([]byte(usage("A PTY is required — add the -t flag.")))
 				_ = s.Exit(1)
 				return
 			}
+
+			log.Printf("Hit 3")
 
 			roomID := cmds[0]
 			password := ""
@@ -37,31 +42,42 @@ func multiMiddleware(srv *Server) wish.Middleware {
 				password = cmds[1]
 			}
 
+			log.Printf("Hit 4")
+
 			// Find or create the room.
 			room := srv.FindRoom(roomID)
 			if room == nil {
+				log.Printf("Hit 5")
 				log.Printf("room %q created with password %q", roomID, password)
 				room = srv.NewRoom(roomID, password)
 			}
 
 			// Password check.
 			if room.password != password {
+				log.Printf("Hit 6")
 				_, _ = s.Write([]byte(usage("Incorrect room password.")))
 				_ = s.Exit(1)
 				return
 			}
 
+			log.Printf("Hit 7")
+
 			// Assign player slot.
 			p, err := room.AddPlayer(s)
 			if err != nil {
+				log.Printf("Hit 8")
 				_, _ = s.Write([]byte(err.Error() + "\n"))
 				_ = s.Exit(1)
 				return
 			}
 
+			log.Printf("Hit 9")
+
 			log.Printf("%s joined room %q [%s]", s.User(), roomID, s.RemoteAddr())
 			p.StartGame()
 			log.Printf("%s left room %q [%s]", s.User(), roomID, s.RemoteAddr())
+
+			log.Printf("Hit 10")
 
 			sh(s)
 		}

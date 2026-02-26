@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/HilthonTT/gosnake/pkg/snake"
@@ -24,7 +25,6 @@ const (
 	colMuted   = lipgloss.Color("243")
 	colScore   = lipgloss.Color("220") // warm yellow
 	colTitle   = lipgloss.Color("82")  // matches P0 head
-	colPause   = lipgloss.Color("214") // amber
 	colDead    = lipgloss.Color("196") // red
 	colWin     = lipgloss.Color("226") // bright yellow
 	colWaiting = lipgloss.Color("244")
@@ -226,9 +226,13 @@ func (m *SharedMultiGame) sendToRoom(msg tea.Msg) {
 }
 
 func (m *SharedMultiGame) View() string {
-	// No state yet — waiting for enough players to join.
+	log.Printf("[View] player=%s width=%d height=%d hasState=%v",
+		m.player.session.User(), m.width, m.height, m.lastState != nil)
+
 	if m.lastState == nil {
-		return m.waitingView()
+		v := m.waitingView()
+		log.Printf("[View] waitingView len=%d", len(v))
+		return v
 	}
 
 	board := m.boardView()
@@ -307,11 +311,12 @@ const deadOverlay = `
 
 func (m *SharedMultiGame) gameOverMsg(state *GameStateMsg) string {
 	var title string
-	if state.Winner == -1 {
+	switch state.Winner {
+	case -1:
 		title = "DRAW — everyone died!"
-	} else if state.Winner == m.player.playerIndex {
+	case m.player.playerIndex:
 		title = "🏆  YOU WIN!"
-	} else {
+	default:
 		// Find winner name from snapshots.
 		winName := fmt.Sprintf("Player %d", state.Winner+1)
 		for _, s := range state.Players {

@@ -10,6 +10,8 @@ import (
 
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
+	"github.com/charmbracelet/wish/activeterm"
+	"github.com/charmbracelet/wish/logging"
 )
 
 // PublicKey wraps ssh.PublicKey and provides a stable string key for maps.
@@ -47,7 +49,11 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 		ssh.PublicKeyAuth(func(_ ssh.Context, _ ssh.PublicKey) bool { return true }),
 		wish.WithHostKeyPath(keyPath),
 		wish.WithAddress(fmt.Sprintf("%s:%d", host, port)),
-		wish.WithMiddleware(multiMiddleware(s)),
+		wish.WithMiddleware(
+			multiMiddleware(s),
+			activeterm.Middleware(),
+			logging.Middleware(),
+		),
 	)
 
 	if err != nil {

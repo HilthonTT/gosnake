@@ -19,6 +19,7 @@ type Player struct {
 	playerIndex int
 	key         PublicKey
 	once        sync.Once
+	wchan       <-chan ssh.Window
 }
 
 // String returns a human-readable label used in log messages and notes.
@@ -69,27 +70,36 @@ func (p *Player) closeOnce() {
 // session ends.  It also forwards terminal resize events and handles context
 // cancellation (e.g. the client disconnecting mid-game).
 func (p *Player) StartGame() {
-	_, wchan, _ := p.session.Pty()
+	log.Printf("[StartGame] %s starting program (index=%d)", p.session.User(), p.playerIndex)
 	errc := make(chan error, 1)
 
-	// Resize / disconnect watcher.
 	go func() {
-		select {
-		case w := <-wchan:
-			if p.program != nil {
-				p.program.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+		for {
+			select {
+			case w, ok := <-p.wchan:
+				if !ok {
+					log.Printf("[StartGame] wchan closed for %s", p.session.User())
+					return
+				}
+				log.Printf("[StartGame] resize event for %s: %dx%d", p.session.User(), w.Width, w.Height)
+				if p.program != nil {
+					p.program.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+				}
+			case err := <-errc:
+				if err != nil {
+					log.Printf("[StartGame] program error for %s: %v", p.session.User(), err)
+				}
+				return
+			case <-p.session.Context().Done():
+				log.Printf("[StartGame] context done for %s", p.session.User())
+				p.closeOnce()
+				return
 			}
-		case err := <-errc:
-			if err != nil {
-				log.Printf("program error for %s: %v", p, err)
-			}
-		case <-p.session.Context().Done():
-			p.closeOnce()
 		}
 	}()
 
 	defer func() {
-		// Let the room know this player left so their name shows as disconnected.
+		log.Printf("[StartGame] %s deferred cleanup", p.session.User())
 		select {
 		case p.room.sync <- NoteMsg(fmt.Sprintf("%s left the room", p)):
 		default:
@@ -97,6 +107,8 @@ func (p *Player) StartGame() {
 		p.closeOnce()
 	}()
 
+	log.Printf("[StartGame] calling Run() for %s", p.session.User())
 	_, err := p.program.Run()
+	log.Printf("[StartGame] Run() returned for %s: err=%v", p.session.User(), err)
 	errc <- err
 }
