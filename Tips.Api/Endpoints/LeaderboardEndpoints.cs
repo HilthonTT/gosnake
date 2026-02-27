@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Http.HttpResults;
+﻿using FluentValidation;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using System.Net.ServerSentEvents;
-using Tips.Api.DTOs;
 using Tips.Api.DTOs.Common;
+using Tips.Api.DTOs.Leaderboard;
 using Tips.Api.Models;
 using Tips.Api.Realtime;
 using Tips.Api.Repositories.Interfaces;
@@ -67,37 +68,12 @@ internal static class LeaderboardEndpoints
             : TypedResults.NotFound();
     }
 
-    private static Results<Created<LeaderboardEntry>, ValidationProblem> SubmitScore(
+    private static async Task<Results<Created<LeaderboardEntry>, ValidationProblem>> SubmitScore(
         SubmitScoreRequest request,
-        ILeaderboardRepository repo)
+        ILeaderboardRepository repo,
+        IValidator<SubmitScoreRequest> validator)
     {
-        // Validate manually so we can return a typed ValidationProblem.
-        var errors = new Dictionary<string, string[]>();
-
-        if (string.IsNullOrWhiteSpace(request.PlayerName))
-        {
-            errors[nameof(request.PlayerName)] = ["Player name is required."];
-        }
-
-        if (request.Score < 0)
-        {
-            errors[nameof(request.Score)] = ["Score must be non-negative."];
-        }
-
-        if (request.Level is < 1 or > 10)
-        {
-            errors[nameof(request.Level)] = ["Level must be between 1 and 10."];
-        }
-
-        if (request.SnakeLength < 1)
-        {
-            errors[nameof(request.SnakeLength)] = ["Snake length must be at least 1."];
-        }
-
-        if (errors.Count > 0)
-        {
-            return TypedResults.ValidationProblem(errors);
-        }
+        await validator.ValidateAndThrowAsync(request);
 
         var entry = repo.Add(
             request.PlayerName.Trim(),

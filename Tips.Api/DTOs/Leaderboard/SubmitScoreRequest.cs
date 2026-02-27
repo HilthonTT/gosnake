@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Tips.Api.DTOs;
+namespace Tips.Api.DTOs.Leaderboard;
 
 public sealed record SubmitScoreRequest(
     [Required, MinLength(1), MaxLength(32)] string PlayerName,

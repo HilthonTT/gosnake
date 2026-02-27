@@ -10,7 +10,8 @@ builder
     .AddApplicationServices()
     .AddBackgroundJobs()
     .AddCorsPolicy()
-    .AddRateLimiting();
+    .AddRateLimiting()
+    .AddErrorHandling();
 
 WebApplication app = builder.Build();
 
@@ -40,10 +41,14 @@ app.UseCors(CorsOptions.PolicyName);
 
 app.UseHttpsRedirection();
 
+app.UseExceptionHandler();
+
 app.UseResponseCaching();
 
 app.UseRateLimiter();
 
 app.MapHealthChecks("/health");
+
+app.UseStatusCodePages();
 
 await app.RunAsync();

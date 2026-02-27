@@ -1,7 +1,9 @@
 ﻿using Asp.Versioning;
+using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using System.Threading.RateLimiting;
+using Tips.Api.Middleware;
 using Tips.Api.Realtime;
 using Tips.Api.Repositories;
 using Tips.Api.Repositories.Interfaces;
@@ -13,6 +15,8 @@ public static class DependencyInjection
 {
     public static WebApplicationBuilder AddApplicationServices(this WebApplicationBuilder builder)
     {
+        builder.Services.AddValidatorsFromAssemblyContaining<Program>(includeInternalTypes: true);
+
         builder.Services.AddResponseCaching();
 
         builder.Services.AddOpenApi();
@@ -41,6 +45,22 @@ public static class DependencyInjection
 
         return builder;
     }
+
+    public static WebApplicationBuilder AddErrorHandling(this WebApplicationBuilder builder)
+    {
+        builder.Services.AddProblemDetails(options =>
+        {
+            options.CustomizeProblemDetails = context =>
+            {
+                context.ProblemDetails.Extensions.TryAdd("requestId", context.HttpContext.TraceIdentifier);
+            };
+        });
+        builder.Services.AddExceptionHandler<ValidationExceptionHandler>();
+        builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+        return builder;
+    }
+
 
     public static WebApplicationBuilder AddBackgroundJobs(this WebApplicationBuilder builder)
     {
