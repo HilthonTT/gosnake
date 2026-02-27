@@ -3,12 +3,12 @@ package data
 import (
 	"database/sql"
 
-	// Import the sqlite3 driver.
-	_ "github.com/mattn/go-sqlite3"
+	// Import the sqlite driver.
+	_ "modernc.org/sqlite"
 )
 
 func NewDB(dataSourceName string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dataSourceName)
+	db, err := sql.Open("sqlite", dataSourceName)
 	if err != nil {
 		return nil, err
 	}

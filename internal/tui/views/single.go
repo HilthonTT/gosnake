@@ -1,12 +1,15 @@
 package views
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/HilthonTT/gosnake/internal/data"
+	"github.com/HilthonTT/gosnake/internal/services/leaderboard"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
 	"github.com/HilthonTT/gosnake/pkg/snake"
@@ -58,6 +61,8 @@ type SingleModel struct {
 	keys   *components.GameKeyMap
 	styles *components.GameStyles
 
+	leaderboardService *leaderboard.LeaderboardService
+
 	width  int
 	height int
 }
@@ -71,13 +76,14 @@ func NewSingleModel(in *tui.SingleInput, db *sql.DB) (*SingleModel, error) {
 	}
 
 	m := &SingleModel{
-		username:      in.Username,
-		help:          help.New(),
-		game:          g,
-		keys:          components.NewGameKeyMap(),
-		tickStopwatch: components.NewStopwatchWithInterval(g.GetDefaultTickInterval()),
-		gameStopwatch: components.NewStopwatchWithInterval(TimerUpdateInterval),
-		styles:        components.CreateGameStyles(),
+		username:           in.Username,
+		help:               help.New(),
+		game:               g,
+		keys:               components.NewGameKeyMap(),
+		tickStopwatch:      components.NewStopwatchWithInterval(g.GetDefaultTickInterval()),
+		gameStopwatch:      components.NewStopwatchWithInterval(TimerUpdateInterval),
+		styles:             components.CreateGameStyles(),
+		leaderboardService: leaderboard.NewLeaderboardService(),
 	}
 
 	return m, nil
@@ -237,6 +243,8 @@ func (m *SingleModel) playingUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 		m.tickStopwatch.SetInterval(m.game.GetTickInterval())
 
 		if m.game.IsGameOver() {
+			m.submitScore()
+
 			return m, tea.Batch(
 				m.tickStopwatch.Stop(),
 				m.gameStopwatch.Stop(),
@@ -339,4 +347,20 @@ func (m *SingleModel) infoView() string {
 	)
 
 	return s.Panel.Render(body)
+}
+
+func (m *SingleModel) submitScore() {
+	req := leaderboard.SubmitScoreRequest{
+		PlayerName:  m.username,
+		Score:       m.game.Score(),
+		Level:       m.game.Level(),
+		SnakeLength: m.game.SnakeLength(),
+	}
+
+	go func() {
+		_, err := m.leaderboardService.SubmitScore(context.Background(), req)
+		if err != nil {
+			log.Printf("%s", err.Error())
+		}
+	}()
 }

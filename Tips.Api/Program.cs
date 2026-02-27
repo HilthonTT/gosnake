@@ -36,11 +36,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseCookiePolicy();
 
+app.UseCors(CorsOptions.PolicyName);
+
 app.UseHttpsRedirection();
 
 app.UseResponseCaching();
-
-app.UseCors(CorsOptions.PolicyName);
 
 app.UseRateLimiter();
 

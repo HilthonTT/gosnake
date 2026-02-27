@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using System.Net.ServerSentEvents;
+using Tips.Api.DTOs.Common;
 using Tips.Api.Models;
 using Tips.Api.Realtime;
 using Tips.Api.Repositories.Interfaces;
@@ -24,7 +25,12 @@ internal static class TipsStream
                      : category.HasValue ? repo.GetByCategory(category.Value)
                      : repo.GetAll();
 
-            return Results.Ok(tips);
+            var response = new CollectionResponse<GameTip>()
+            {
+                Items = tips.ToList()
+            };
+
+            return Results.Ok(response);
         })
         .WithName("GetTips");
 

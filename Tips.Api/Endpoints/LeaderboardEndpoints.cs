@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Net.ServerSentEvents;
 using Tips.Api.DTOs;
+using Tips.Api.DTOs.Common;
 using Tips.Api.Models;
 using Tips.Api.Realtime;
 using Tips.Api.Repositories.Interfaces;
@@ -17,7 +18,7 @@ internal static class LeaderboardEndpoints
         RouteGroupBuilder group = routes.MapGroup("leaderboard")
             .WithTags("Leaderboard");
 
-        group.MapGet("", GetLeaderboard)
+        group.MapGet("/", GetLeaderboard)
             .WithName("GetLeaderboard")
             .CacheOutput(p => p.Expire(TimeSpan.FromSeconds(10)));
 
@@ -27,7 +28,7 @@ internal static class LeaderboardEndpoints
         group.MapGet("player/{playerName}", GetByPlayer)
             .WithName("GetPlayerScores");
 
-        group.MapPost("", SubmitScore)
+        group.MapPost("/", SubmitScore)
             .WithName("SubmitScore")
             .RequireRateLimiting("default");
 
@@ -35,22 +36,34 @@ internal static class LeaderboardEndpoints
             .WithName("DeleteLeaderboardEntry");
     }
 
-    private static Ok<IReadOnlyList<LeaderboardEntry>> GetLeaderboard(
+    private static Ok<CollectionResponse<LeaderboardEntry>> GetLeaderboard(
         ILeaderboardRepository repo,
         [FromQuery] int top = 100)
     {
         top = Math.Clamp(top, 1, 1000);
         var entries = repo.GetTopN(top);
-        return TypedResults.Ok(entries);
+
+        var response = new CollectionResponse<LeaderboardEntry>()
+        {
+            Items = entries.ToList()
+        };
+
+        return TypedResults.Ok(response);
     }
 
-    private static Results<Ok<IReadOnlyList<LeaderboardEntry>>, NotFound> GetByPlayer(
+    private static Results<Ok<CollectionResponse<LeaderboardEntry>>, NotFound> GetByPlayer(
         string playerName,
         ILeaderboardRepository repo)
     {
         var entries = repo.GetByPlayer(playerName);
+
+        var response = new CollectionResponse<LeaderboardEntry>()
+        {
+            Items = entries.ToList()
+        };
+
         return entries.Count > 0
-            ? TypedResults.Ok(entries)
+            ? TypedResults.Ok(response)
             : TypedResults.NotFound();
     }
 
