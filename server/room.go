@@ -229,7 +229,7 @@ func (r *Room) listen() {
 
 			case DirectionMsg:
 				if r.game != nil {
-					r.game.ChangeDirection(m.PlayerIndex, multi.Direction(m.Direction))
+					r.game.ChangeDirection(m.PlayerIndex, snake.Direction(m.Direction))
 				}
 
 			case RestartMsg:

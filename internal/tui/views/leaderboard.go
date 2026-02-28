@@ -2,6 +2,7 @@ package views
 
 import (
 	"database/sql"
+	"log"
 	"strconv"
 
 	"github.com/HilthonTT/gosnake/internal/data"
@@ -36,7 +37,7 @@ func NewLeaderboardModel(in *tui.LeaderboardInput, db *sql.DB) (*LeaderboardMode
 			in.NewEntry.Name = "Anonymous"
 		}
 
-		newEntryID, err = repo.Save(in.NewEntry.Name, in.NewEntry.Score, in.NewEntry.Level)
+		newEntryID, err = repo.Save(in.NewEntry.Name, in.NewEntry.Score, in.NewEntry.Level, in.NewEntry.Mode)
 		if err != nil {
 			return nil, err
 		}
@@ -91,6 +92,7 @@ func buildLeaderboardTable(entries []data.LeaderboardEntry, focusID int) table.M
 		{Title: "Name", Width: 10},
 		{Title: "Score", Width: 10},
 		{Title: "Level", Width: 10},
+		{Title: "Mode", Width: 10},
 	}
 
 	focusIndex := 0
@@ -101,10 +103,13 @@ func buildLeaderboardTable(entries []data.LeaderboardEntry, focusID int) table.M
 			focusIndex = i
 		}
 
+		log.Println(e.Mode)
+
 		rows[i] = table.Row{
 			e.Name,
 			strconv.Itoa(e.Score),
 			strconv.Itoa(e.Level),
+			string(e.Mode),
 		}
 	}
 

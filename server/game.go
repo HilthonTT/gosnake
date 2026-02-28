@@ -206,13 +206,13 @@ func (m *SharedMultiGame) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	idx := m.player.playerIndex
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(multi.Up)})
+		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(snake.Up)})
 	case key.Matches(msg, m.keys.Down):
-		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(multi.Down)})
+		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(snake.Down)})
 	case key.Matches(msg, m.keys.Left):
-		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(multi.Left)})
+		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(snake.Left)})
 	case key.Matches(msg, m.keys.Right):
-		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(multi.Right)})
+		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(snake.Right)})
 	}
 	return m, nil
 }

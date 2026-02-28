@@ -27,14 +27,16 @@ type Mode int
 
 const (
 	ModeMenu = Mode(iota)
-	ModeGame
 	ModeLeaderboard
+	ModeNormal
+	ModeCrazy
 )
 
 var modeToStrMap = map[Mode]string{
 	ModeMenu:        "Menu",
-	ModeGame:        "Game",
 	ModeLeaderboard: "Leaderboard",
+	ModeNormal:      "Normal",
+	ModeCrazy:       "Crazy",
 }
 
 func (m Mode) String() string {

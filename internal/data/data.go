@@ -27,6 +27,7 @@ func EnsureTableExists(db *sql.DB) error {
 			name       TEXT     NOT NULL,
 			score      INTEGER  NOT NULL DEFAULT 0,
 			level      INTEGER  NOT NULL DEFAULT 1,
+			mode       TEXT     NOT NULL DEFAULT 'normal',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 	`

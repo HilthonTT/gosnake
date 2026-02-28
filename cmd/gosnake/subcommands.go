@@ -24,12 +24,23 @@ func (c *MenuCmd) Run(globals *GlobalVars) error {
 }
 
 type PlayCmd struct {
-	Level int    `help:"Level to start at" short:"l" default:"1"`
-	Name  string `help:"Name of the player" short:"n" default:"Anonymous"`
+	GameMode string `arg:"" help:"Game mode to play" default:"normal"`
+	Level    int    `help:"Level to start at" short:"l" default:"1"`
+	Name     string `help:"Name of the player" short:"n" default:"Anonymous"`
 }
 
 func (c *PlayCmd) Run(globals *GlobalVars) error {
-	return launchStarter(globals, tui.ModeGame, tui.NewSingleInput(tui.ModeGame, c.Level, c.Name))
+	playerModes := map[string]tui.Mode{
+		"normal": tui.ModeNormal,
+		"crazy":  tui.ModeCrazy,
+	}
+
+	mode, ok := playerModes[c.GameMode]
+	if !ok {
+		return fmt.Errorf("invalid game mode: %s", c.GameMode)
+	}
+
+	return launchStarter(globals, mode, tui.NewSingleInput(mode, c.Level, c.Name))
 }
 
 type LeaderboardCmd struct{}

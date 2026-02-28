@@ -5,11 +5,20 @@ import (
 	"fmt"
 )
 
+// GameMode identifies which ruleset was played.
+type GameMode string
+
+const (
+	GameModeNormal GameMode = "normal"
+	GameModeCrazy  GameMode = "crazy"
+)
+
 type LeaderboardEntry struct {
 	ID        int
 	Name      string
 	Score     int
 	Level     int
+	Mode      GameMode
 	CreatedAt string
 }
 
@@ -21,19 +30,19 @@ func NewLeaderboardRepository(db *sql.DB) *LeaderboardRepository {
 	return &LeaderboardRepository{db}
 }
 
-func (r *LeaderboardRepository) Save(name string, score, level int) (int, error) {
+func (r *LeaderboardRepository) Save(name string, score, level int, mode GameMode) (int, error) {
 	const query = `
-		INSERT INTO leaderboard (name, score, level)
-		VALUES (?, ?, ?)
+		INSERT INTO leaderboard (name, score, level, mode)
+		VALUES (?, ?, ?, ?)
 	`
-	res, err := r.db.Exec(query, name, score, level)
+	res, err := r.db.Exec(query, name, score, level, mode)
 	if err != nil {
 		return 0, fmt.Errorf("failed to save leaderboard entry: %w", err)
 	}
 
 	id, err := res.LastInsertId()
 	if err != nil {
-		return 0, fmt.Errorf("failed to save leaderboard entry: %w", err)
+		return 0, fmt.Errorf("failed to retrieve last insert id: %w", err)
 	}
 
 	return int(id), nil
@@ -41,7 +50,7 @@ func (r *LeaderboardRepository) Save(name string, score, level int) (int, error)
 
 func (r *LeaderboardRepository) All() ([]LeaderboardEntry, error) {
 	const query = `
-		SELECT id, name, score, level, created_at
+		SELECT id, name, score, level, mode, created_at
 		FROM leaderboard
 		ORDER BY score DESC
 	`
@@ -50,15 +59,12 @@ func (r *LeaderboardRepository) All() ([]LeaderboardEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query leaderboard: %w", err)
 	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
 	defer rows.Close()
 
 	var entries []LeaderboardEntry
 	for rows.Next() {
 		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
 		}
 		entries = append(entries, e)
@@ -73,7 +79,7 @@ func (r *LeaderboardRepository) All() ([]LeaderboardEntry, error) {
 
 func (r *LeaderboardRepository) GetTopN(n int) ([]LeaderboardEntry, error) {
 	const query = `
-		SELECT id, name, score, level, created_at
+		SELECT id, name, score, level, mode, created_at
 		FROM leaderboard
 		ORDER BY score DESC
 		LIMIT ?
@@ -87,7 +93,37 @@ func (r *LeaderboardRepository) GetTopN(n int) ([]LeaderboardEntry, error) {
 	var entries []LeaderboardEntry
 	for rows.Next() {
 		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("leaderboard row iteration error: %w", err)
+	}
+
+	return entries, nil
+}
+
+func (r *LeaderboardRepository) GetTopNByMode(n int, mode GameMode) ([]LeaderboardEntry, error) {
+	const query = `
+		SELECT id, name, score, level, mode, created_at
+		FROM leaderboard
+		WHERE mode = ?
+		ORDER BY score DESC
+		LIMIT ?
+	`
+	rows, err := r.db.Query(query, mode, n)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query leaderboard by mode: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []LeaderboardEntry
+	for rows.Next() {
+		var e LeaderboardEntry
+		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
 		}
 		entries = append(entries, e)
@@ -102,7 +138,7 @@ func (r *LeaderboardRepository) GetTopN(n int) ([]LeaderboardEntry, error) {
 
 func (r *LeaderboardRepository) GetByName(name string) ([]LeaderboardEntry, error) {
 	const query = `
-		SELECT id, name, score, level, created_at
+		SELECT id, name, score, level, mode, created_at
 		FROM leaderboard
 		WHERE name = ?
 		ORDER BY score DESC
@@ -116,7 +152,7 @@ func (r *LeaderboardRepository) GetByName(name string) ([]LeaderboardEntry, erro
 	var entries []LeaderboardEntry
 	for rows.Next() {
 		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
 		}
 		entries = append(entries, e)

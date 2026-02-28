@@ -13,6 +13,7 @@ import (
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
 	"github.com/HilthonTT/gosnake/pkg/snake"
+	"github.com/HilthonTT/gosnake/pkg/snake/modes/crazy"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/single"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -42,13 +43,16 @@ Press PAUSE to continue or HOLD to exit.
 `
 
 	TimerUpdateInterval = time.Millisecond * 13
+
+	bombBlinkPeriodMs = crazy.BombBlinkPeriodMs
 )
 
 var _ tea.Model = &SingleModel{}
 
 type SingleModel struct {
 	username string
-	game     *single.Game
+	game     snake.GameController
+	mode     tui.Mode
 
 	// tickStopwatch drives the snake's movement; its interval shrinks as the
 	// level rises
@@ -70,9 +74,24 @@ type SingleModel struct {
 func NewSingleModel(in *tui.SingleInput, db *sql.DB) (*SingleModel, error) {
 	repo := data.NewLeaderboardRepository(db)
 
-	g, err := single.NewGame(repo)
-	if err != nil {
-		return nil, fmt.Errorf("creating snake game")
+	var (
+		g   snake.GameController
+		err error
+	)
+
+	switch in.Mode {
+	case tui.ModeNormal:
+		g, err = single.NewGame(repo)
+		if err != nil {
+			return nil, fmt.Errorf("creating normal snake game: %w", err)
+		}
+	case tui.ModeCrazy:
+		g, err = crazy.NewGame(repo)
+		if err != nil {
+			return nil, fmt.Errorf("creating crazy snake game: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported game mode: %v", in.Mode)
 	}
 
 	m := &SingleModel{
@@ -84,6 +103,7 @@ func NewSingleModel(in *tui.SingleInput, db *sql.DB) (*SingleModel, error) {
 		gameStopwatch:      components.NewStopwatchWithInterval(TimerUpdateInterval),
 		styles:             components.CreateGameStyles(),
 		leaderboardService: leaderboard.NewLeaderboardService(),
+		mode:               in.Mode,
 	}
 
 	return m, nil
@@ -178,6 +198,7 @@ func (m *SingleModel) gameOverUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 				Score:     m.game.Score(),
 				Level:     m.game.Level(),
 				CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+				Mode:      gameModeFromTUI(m.mode),
 			}
 
 			return m, tui.SwitchModeCmd(
@@ -200,13 +221,13 @@ func (m *SingleModel) togglePause() tea.Cmd {
 func (m *SingleModel) playingKeyUpdate(msg tea.KeyMsg) (*SingleModel, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		m.game.ChangeDirection(single.Up)
+		m.game.ChangeDirection(snake.Up)
 	case key.Matches(msg, m.keys.Down):
-		m.game.ChangeDirection(single.Down)
+		m.game.ChangeDirection(snake.Down)
 	case key.Matches(msg, m.keys.Left):
-		m.game.ChangeDirection(single.Left)
+		m.game.ChangeDirection(snake.Left)
 	case key.Matches(msg, m.keys.Right):
-		m.game.ChangeDirection(single.Right)
+		m.game.ChangeDirection(snake.Right)
 	case key.Matches(msg, m.keys.Pause):
 		return m, m.togglePause()
 	case key.Matches(msg, m.keys.Quit):
@@ -292,6 +313,17 @@ func (m *SingleModel) renderCell(cell byte) string {
 		return m.styles.BodyCell.Render(chars.Body)
 	case 'F':
 		return m.styles.FoodCell.Render(chars.Food)
+	case 'B':
+		// Active bomb — always shown with a distinctive style.
+		return m.styles.BombCell.Render(chars.Bomb)
+
+	case 'W':
+		// Warning bomb — blinks by alternating between the warning glyph and
+		// an empty cell based on wall-clock milliseconds.
+		if (time.Now().UnixMilli()/bombBlinkPeriodMs)%2 == 0 {
+			return m.styles.BombWarningCell.Render(chars.BombWarning)
+		}
+		return m.styles.EmptyCell.Render(chars.Empty)
 	default:
 		return m.styles.EmptyCell.Render(chars.Empty)
 	}
@@ -363,4 +395,11 @@ func (m *SingleModel) submitScore() {
 			log.Printf("%s", err.Error())
 		}
 	}()
+}
+
+func gameModeFromTUI(m tui.Mode) data.GameMode {
+	if m == tui.ModeCrazy {
+		return data.GameModeCrazy
+	}
+	return data.GameModeNormal
 }

@@ -47,6 +47,7 @@ type MenuModel struct {
 
 type MenuFormData struct {
 	Username string
+	GameMode tui.Mode
 	Level    int
 }
 
@@ -69,6 +70,13 @@ func NewMenuModel(_ *tui.MenuInput) *MenuModel {
 						}
 						return nil
 					}),
+				huh.NewSelect[tui.Mode]().
+					Value(&formData.GameMode).
+					Title("Game Mode:").
+					Options(
+						huh.NewOption("Normal", tui.ModeNormal),
+						huh.NewOption("Crazy", tui.ModeCrazy),
+					),
 				huh.NewSelect[int]().
 					Value(&formData.Level).
 					Title("Starting Level").
@@ -140,8 +148,8 @@ func (m *MenuModel) View() string {
 
 func (m *MenuModel) announceCompletion() tea.Cmd {
 	m.hasAnnouncedCompletion = true
-	in := tui.NewSingleInput(tui.ModeGame, m.formData.Level, m.formData.Username)
-	return tui.SwitchModeCmd(tui.ModeGame, in)
+	in := tui.NewSingleInput(m.formData.GameMode, m.formData.Level, m.formData.Username)
+	return tui.SwitchModeCmd(m.formData.GameMode, in)
 }
 
 func greenTheme() *huh.Theme {

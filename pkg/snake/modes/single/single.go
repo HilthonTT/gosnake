@@ -1,25 +1,20 @@
 package single
 
 import (
+	"slices"
+
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/pkg/snake"
 )
 
-type Direction int
-
-const (
-	Up Direction = iota
-	Down
-	Left
-	Right
-)
+var _ snake.GameController = (*Game)(nil)
 
 type Game struct {
 	matrix    snake.Matrix
-	snake     []snake.Point
+	snakeBody []snake.Point
 	food      *snake.Point
-	direction Direction
-	nextDir   Direction
+	direction snake.Direction
+	nextDir   snake.Direction
 	scoring   *snake.Scoring
 	gameOver  bool
 	paused    bool
@@ -42,10 +37,10 @@ func NewGame(repo *data.LeaderboardRepository) (*Game, error) {
 
 	g := &Game{
 		matrix:    matrix,
-		snake:     initialSnake,
+		snakeBody: initialSnake,
 		food:      food,
-		direction: Right,
-		nextDir:   Right,
+		direction: snake.Right,
+		nextDir:   snake.Right,
 		scoring:   scoring,
 		repo:      repo,
 		paused:    false,
@@ -57,16 +52,16 @@ func NewGame(repo *data.LeaderboardRepository) (*Game, error) {
 	return g, nil
 }
 
-// ChangeDirection queues a direction change, preventing 180-degree reversals.
-func (g *Game) ChangeDirection(d Direction) {
+// ChangeDirection queues a direction change, preventing 180-degree reversals.snake.
+func (g *Game) ChangeDirection(d snake.Direction) {
 	if g.gameOver || g.paused {
 		return
 	}
 
-	if (d == Up && g.direction == Down) ||
-		(d == Down && g.direction == Up) ||
-		(d == Left && g.direction == Right) ||
-		(d == Right && g.direction == Left) {
+	if (d == snake.Up && g.direction == snake.Down) ||
+		(d == snake.Down && g.direction == snake.Up) ||
+		(d == snake.Left && g.direction == snake.Right) ||
+		(d == snake.Right && g.direction == snake.Left) {
 		return
 	}
 
@@ -90,17 +85,17 @@ func (g *Game) Tick() {
 
 	g.direction = g.nextDir
 
-	head := g.snake[0]
+	head := g.snakeBody[0]
 	next := head
 
 	switch g.direction {
-	case Up:
+	case snake.Up:
 		next.Y--
-	case Down:
+	case snake.Down:
 		next.Y++
-	case Left:
+	case snake.Left:
 		next.X--
-	case Right:
+	case snake.Right:
 		next.X++
 	}
 
@@ -120,21 +115,21 @@ func (g *Game) Tick() {
 	ateFood := next.X == g.food.X && next.Y == g.food.Y
 
 	// Prepend new head
-	g.snake = append([]snake.Point{next}, g.snake...)
+	g.snakeBody = append([]snake.Point{next}, g.snakeBody...)
 
 	if ateFood {
 		g.scoring.AddPoints(10)
-		g.food = snake.NewFood(g.snake)
+		g.food = snake.NewFood(g.snakeBody)
 	} else {
 		// Remove tail
-		g.snake = g.snake[:len(g.snake)-1]
+		g.snakeBody = g.snakeBody[:len(g.snakeBody)-1]
 	}
 
 	g.render()
 }
 
 func (g *Game) SaveScore(name string) error {
-	_, err := g.repo.Save(name, g.scoring.Total(), g.scoring.Level())
+	_, err := g.repo.Save(name, g.scoring.Total(), g.scoring.Level(), data.GameModeNormal)
 	return err
 }
 
@@ -157,7 +152,7 @@ func (g *Game) render() {
 	}
 
 	// Draw snake
-	for i, p := range g.snake {
+	for i, p := range g.snakeBody {
 		if i == 0 {
 			g.matrix.Set(p, 'H')
 		} else {
@@ -168,10 +163,5 @@ func (g *Game) render() {
 
 // isSelfCollision determines if the snake is colliding itself
 func (g *Game) isSelfCollision(p snake.Point) bool {
-	for _, s := range g.snake {
-		if s.X == p.X && s.Y == p.Y {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(g.snakeBody, p)
 }

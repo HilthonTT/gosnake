@@ -9,23 +9,13 @@ const MaxPlayers = 3
 var HeadCells = [MaxPlayers]byte{'H', 'A', 'X'}
 var BodyCells = [MaxPlayers]byte{'S', 'B', 'Y'}
 
-// Direction mirrors the single-player type so callers don't import that package.
-type Direction int
-
-const (
-	Up Direction = iota
-	Down
-	Left
-	Right
-)
-
 // PlayerSnake is one player's snake state.
 type PlayerSnake struct {
 	Index     int
 	Name      string
 	Points    []snake.Point
-	Direction Direction
-	nextDir   Direction
+	Direction snake.Direction
+	nextDir   snake.Direction
 	Alive     bool
 	Score     int
 }
@@ -52,7 +42,7 @@ func NewGame(names []string) *Game {
 		{X: 3 * snake.DefaultCols / 4, Y: snake.DefaultRows / 2},
 		{X: snake.DefaultCols / 2, Y: snake.DefaultRows / 4},
 	}
-	startDirs := [MaxPlayers]Direction{Right, Left, Down}
+	startDirs := [MaxPlayers]snake.Direction{snake.Right, snake.Left, snake.Down}
 
 	players := make([]*PlayerSnake, n)
 	var allPts []snake.Point
@@ -95,7 +85,7 @@ func NewGame(names []string) *Game {
 
 // ChangeDirection queues a direction change for a player, rejecting 180° reversals.
 // Safe to call from any goroutine that owns the room lock.
-func (g *Game) ChangeDirection(playerIndex int, d Direction) {
+func (g *Game) ChangeDirection(playerIndex int, d snake.Direction) {
 	if playerIndex < 0 || playerIndex >= len(g.players) {
 		return
 	}
@@ -104,8 +94,8 @@ func (g *Game) ChangeDirection(playerIndex int, d Direction) {
 		return
 	}
 	cur := p.Direction
-	if (d == Up && cur == Down) || (d == Down && cur == Up) ||
-		(d == Left && cur == Right) || (d == Right && cur == Left) {
+	if (d == snake.Up && cur == snake.Down) || (d == snake.Down && cur == snake.Up) ||
+		(d == snake.Left && cur == snake.Right) || (d == snake.Right && cur == snake.Left) {
 		return
 	}
 	p.nextDir = d
@@ -135,13 +125,13 @@ func (g *Game) Tick() []int {
 		n := h
 
 		switch p.Direction {
-		case Up:
+		case snake.Up:
 			n.Y--
-		case Down:
+		case snake.Down:
 			n.Y++
-		case Left:
+		case snake.Left:
 			n.X--
-		case Right:
+		case snake.Right:
 			n.X++
 		}
 		pending = append(pending, move{p, n})
