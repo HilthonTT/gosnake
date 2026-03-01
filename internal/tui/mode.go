@@ -69,6 +69,7 @@ func (in *SingleInput) isSwitchModeInput() {}
 
 type LeaderboardInput struct {
 	NewEntry *data.LeaderboardEntry
+	Entries  []data.LeaderboardEntry
 }
 
 func NewLeaderboardInput(opts ...func(input *LeaderboardInput)) *LeaderboardInput {
@@ -87,4 +88,8 @@ func WithNewEntry(entry *data.LeaderboardEntry) func(input *LeaderboardInput) {
 	return func(input *LeaderboardInput) {
 		input.NewEntry = entry
 	}
+}
+
+func (i *LeaderboardInput) SetEntries(entries []data.LeaderboardEntry) {
+	i.Entries = entries
 }

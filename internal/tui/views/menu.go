@@ -85,7 +85,8 @@ func NewMenuModel(_ *tui.MenuInput) *MenuModel {
 			),
 		).
 			WithKeyMap(keys.formKeys).
-			WithTheme(greenTheme()),
+			WithTheme(greenTheme()).
+			WithAccessible(true),
 		keys: keys,
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Broderick-Westrope/charmutils"
 	"github.com/HilthonTT/gosnake/internal/config"
+	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/views"
 	"github.com/charmbracelet/bubbles/key"
@@ -33,10 +34,11 @@ func NewInput(mode tui.Mode, db *sql.DB, cfg *config.Config, switchIn tui.Switch
 var _ tea.Model = &Model{}
 
 type Model struct {
-	child        tea.Model
-	db           *sql.DB
-	cfg          *config.Config
-	forceQuitKey key.Binding
+	child           tea.Model
+	db              *sql.DB
+	cfg             *config.Config
+	forceQuitKey    key.Binding
+	leaderboardRepo *data.LeaderboardRepository
 
 	width  int
 	height int
@@ -46,9 +48,10 @@ type Model struct {
 
 func NewModel(in *Input) (*Model, error) {
 	m := &Model{
-		db:           in.db,
-		cfg:          in.cfg,
-		forceQuitKey: key.NewBinding(key.WithKeys(in.cfg.Keys.ForceQuit...)),
+		db:              in.db,
+		cfg:             in.cfg,
+		leaderboardRepo: data.NewLeaderboardRepository(in.db),
+		forceQuitKey:    key.NewBinding(key.WithKeys(in.cfg.Keys.ForceQuit...)),
 	}
 
 	err := m.setChild(in.mode, in.switchIn)
@@ -124,11 +127,31 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 		if !ok {
 			return fmt.Errorf("switchIn is not a LeaderboardInput: %w", charmutils.ErrInvalidTypeAssertion)
 		}
-		child, err := views.NewLeaderboardModel(leaderboardIn, m.db)
-		if err != nil {
-			return fmt.Errorf("creating leaderboard model: %w", err)
+
+		// Save the new entry before fetching, if one exists.
+		if leaderboardIn.NewEntry != nil {
+			if leaderboardIn.NewEntry.Name == "" {
+				leaderboardIn.NewEntry.Name = "Anonymous"
+			}
+			id, err := m.leaderboardRepo.Save(
+				leaderboardIn.NewEntry.Name,
+				leaderboardIn.NewEntry.Score,
+				leaderboardIn.NewEntry.Level,
+				leaderboardIn.NewEntry.Mode,
+			)
+			if err != nil {
+				return fmt.Errorf("saving leaderboard entry: %w", err)
+			}
+			leaderboardIn.NewEntry.ID = id
 		}
-		m.child = child
+
+		entries, err := m.leaderboardRepo.All()
+		if err != nil {
+			return fmt.Errorf("fetching leaderboard entries: %w", err)
+		}
+		leaderboardIn.Entries = entries
+
+		m.child = views.NewLeaderboardModel(leaderboardIn)
 
 	default:
 		return errors.New("invalid mode")
