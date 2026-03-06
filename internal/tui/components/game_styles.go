@@ -6,6 +6,8 @@ import "github.com/charmbracelet/lipgloss"
 const (
 	colSnakeHead   = lipgloss.Color("82")  // bright lime green
 	colSnakeBody   = lipgloss.Color("40")  // medium green
+	colAIHead      = lipgloss.Color("39")  // bright cyan        — AI head
+	colAIBody      = lipgloss.Color("26")  // medium blue        — AI body
 	colFood        = lipgloss.Color("196") // bright red
 	colEmpty       = lipgloss.Color("236") // very dark grey
 	colBorder      = lipgloss.Color("241") // mid grey
@@ -16,6 +18,7 @@ const (
 	colGameOver    = lipgloss.Color("196") // red for game-over state
 	colBomb        = lipgloss.Color("196") // bright red  — active/lethal bomb
 	colBombWarning = lipgloss.Color("214") // amber       — blinking pre-warning
+	colAILabel     = lipgloss.Color("39")  // cyan — AI section label in info panel
 )
 
 // CellCharacters holds the two-rune wide strings used for each cell type.
@@ -27,6 +30,8 @@ type CellCharacters struct {
 	Food        string // food pellet
 	Bomb        string // active (lethal) bomb
 	BombWarning string // warning (blinking, not yet lethal) bomb
+	AIHead      string // AI snake head
+	AIBody      string // AI snake body
 }
 
 // InfoStyles groups all styles used in the side information panel.
@@ -36,6 +41,7 @@ type InfoStyles struct {
 	SectionLbl lipgloss.Style
 	ValueBig   lipgloss.Style
 	Divider    lipgloss.Style
+	AILabel    lipgloss.Style
 }
 
 // OverlayStyles groups styles for the pause / game-over overlay text.
@@ -53,6 +59,8 @@ type GameStyles struct {
 	FoodCell        lipgloss.Style
 	BombCell        lipgloss.Style // active bomb — always visible, lethal
 	BombWarningCell lipgloss.Style // warning bomb — rendered on blink "on" frames
+	AIHeadCell      lipgloss.Style
+	AIBodyCell      lipgloss.Style
 	Info            InfoStyles
 	Overlay         OverlayStyles
 	CellChars       CellCharacters
@@ -88,6 +96,9 @@ func CreateGameStyles() *GameStyles {
 			Foreground(colBombWarning).
 			Bold(true),
 
+		AIHeadCell: lipgloss.NewStyle().Foreground(colAIHead).Bold(true),
+		AIBodyCell: lipgloss.NewStyle().Foreground(colAIBody),
+
 		// Info Panel
 		Info: InfoStyles{
 			Panel: lipgloss.NewStyle().
@@ -115,6 +126,12 @@ func CreateGameStyles() *GameStyles {
 			Divider: lipgloss.NewStyle().
 				Foreground(colBorder).
 				Width(panelWidth - 2),
+
+			AILabel: lipgloss.NewStyle().
+				Width(panelWidth - 2).
+				Align(lipgloss.Center).
+				Bold(true).
+				Foreground(colAILabel),
 		},
 
 		// Overlays
@@ -141,6 +158,8 @@ func CreateGameStyles() *GameStyles {
 			Food:        "◆ ",
 			Bomb:        "💣",  // two columns wide in most terminals
 			BombWarning: "⚠ ", // warning sign + space = two columns
+			AIHead:      "▲▲", // distinct shape from the player's filled block
+			AIBody:      "░░", // light shade — clearly different from player ▓▓
 		},
 	}
 }

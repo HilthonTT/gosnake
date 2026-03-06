@@ -33,6 +33,7 @@ func (c *PlayCmd) Run(globals *GlobalVars) error {
 	playerModes := map[string]tui.Mode{
 		"normal": tui.ModeNormal,
 		"crazy":  tui.ModeCrazy,
+		"ai":     tui.ModeAI,
 	}
 
 	mode, ok := playerModes[c.GameMode]

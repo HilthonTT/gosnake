@@ -76,6 +76,7 @@ func NewMenuModel(_ *tui.MenuInput) *MenuModel {
 					Options(
 						huh.NewOption("Normal", tui.ModeNormal),
 						huh.NewOption("Crazy", tui.ModeCrazy),
+						huh.NewOption("AI", tui.ModeAI),
 					),
 				huh.NewSelect[int]().
 					Value(&formData.Level).

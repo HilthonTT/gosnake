@@ -111,7 +111,7 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 		}
 		m.child = views.NewMenuModel(menuIn)
 
-	case tui.ModeNormal, tui.ModeCrazy:
+	case tui.ModeNormal, tui.ModeCrazy, tui.ModeAI:
 		singleIn, ok := switchIn.(*tui.SingleInput)
 		if !ok {
 			return fmt.Errorf("switchIn is not a SingleInput: %w", charmutils.ErrInvalidTypeAssertion)

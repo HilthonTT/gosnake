@@ -11,6 +11,7 @@ type GameMode string
 const (
 	GameModeNormal GameMode = "normal"
 	GameModeCrazy  GameMode = "crazy"
+	GameModeAI     GameMode = "AI"
 )
 
 type LeaderboardEntry struct {

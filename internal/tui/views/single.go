@@ -13,6 +13,7 @@ import (
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
 	"github.com/HilthonTT/gosnake/pkg/snake"
+	"github.com/HilthonTT/gosnake/pkg/snake/modes/ai"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/crazy"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/single"
 	"github.com/charmbracelet/bubbles/help"
@@ -89,6 +90,11 @@ func NewSingleModel(in *tui.SingleInput, db *sql.DB) (*SingleModel, error) {
 		g, err = crazy.NewGame(repo)
 		if err != nil {
 			return nil, fmt.Errorf("creating crazy snake game: %w", err)
+		}
+	case tui.ModeAI:
+		g, err = ai.NewGame(repo)
+		if err != nil {
+			return nil, fmt.Errorf("creating AI snake game: %w", err)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported game mode: %v", in.Mode)
@@ -324,6 +330,10 @@ func (m *SingleModel) renderCell(cell byte) string {
 			return m.styles.BombWarningCell.Render(chars.BombWarning)
 		}
 		return m.styles.EmptyCell.Render(chars.Empty)
+	case 'A':
+		return m.styles.AIHeadCell.Render(chars.AIHead)
+	case 'Z':
+		return m.styles.AIBodyCell.Render(chars.AIBody)
 	default:
 		return m.styles.EmptyCell.Render(chars.Empty)
 	}
@@ -339,16 +349,18 @@ func (m *SingleModel) infoView() string {
 		headerText = "GAME OVER"
 	case m.game.IsPaused():
 		headerText = "PAUSED"
+	case m.mode == tui.ModeCrazy:
+		headerText = "CRAZY MODE"
+	case m.mode == tui.ModeAI:
+		headerText = "VS AI"
 	default:
 		headerText = "SNAKE ON"
 	}
-	header := s.Title.Render(headerText)
 
 	elapsed := m.gameStopwatch.Elapsed().Seconds()
 	minutes := int(elapsed) / 60
 	seconds := int(elapsed) % 60
 	centis := int(elapsed*100) % 100
-
 	var timeStr string
 	if minutes > 0 {
 		timeStr = fmt.Sprintf("%02d:%02d", minutes, seconds)
@@ -356,9 +368,7 @@ func (m *SingleModel) infoView() string {
 		timeStr = fmt.Sprintf("%02d.%02d", seconds, centis)
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		"\n",
+	playerSection := lipgloss.JoinVertical(lipgloss.Left,
 		s.SectionLbl.Render("Score"),
 		s.ValueBig.Render(fmt.Sprintf("%d", m.game.Score())),
 		"\n",
@@ -377,6 +387,41 @@ func (m *SingleModel) infoView() string {
 		s.SectionLbl.Render("Length"),
 		s.ValueBig.Render(fmt.Sprintf("%d", m.game.SnakeLength())),
 	)
+
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		s.Title.Render(headerText),
+		"\n",
+		playerSection,
+	)
+
+	if ai, ok := m.game.(snake.AIGameController); ok {
+		aiStatus := "ALIVE"
+		if !ai.IsAIAlive() {
+			aiStatus = "DEAD"
+		}
+
+		aiSection := lipgloss.JoinVertical(lipgloss.Left,
+			"\n",
+			divider,
+			"\n",
+			s.AILabel.Render("── AI ──"),
+			"\n",
+			s.SectionLbl.Render("Score"),
+			s.ValueBig.Render(fmt.Sprintf("%d", ai.AIScore())),
+			"\n",
+			divider,
+			"\n",
+			s.SectionLbl.Render("Length"),
+			s.ValueBig.Render(fmt.Sprintf("%d", ai.AISnakeLength())),
+			"\n",
+			divider,
+			"\n",
+			s.SectionLbl.Render("Status"),
+			s.ValueBig.Render(aiStatus),
+		)
+
+		body = lipgloss.JoinVertical(lipgloss.Left, body, aiSection)
+	}
 
 	return s.Panel.Render(body)
 }
@@ -398,8 +443,12 @@ func (m *SingleModel) submitScore() {
 }
 
 func gameModeFromTUI(m tui.Mode) data.GameMode {
-	if m == tui.ModeCrazy {
+	switch m {
+	case tui.ModeCrazy:
 		return data.GameModeCrazy
+	case tui.ModeAI:
+		return data.GameModeAI
+	default:
+		return data.GameModeNormal
 	}
-	return data.GameModeNormal
 }

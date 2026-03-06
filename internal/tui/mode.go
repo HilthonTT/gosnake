@@ -30,6 +30,7 @@ const (
 	ModeLeaderboard
 	ModeNormal
 	ModeCrazy
+	ModeAI
 )
 
 var modeToStrMap = map[Mode]string{
@@ -37,6 +38,7 @@ var modeToStrMap = map[Mode]string{
 	ModeLeaderboard: "Leaderboard",
 	ModeNormal:      "Normal",
 	ModeCrazy:       "Crazy",
+	ModeAI:          "ModeAI",
 }
 
 func (m Mode) String() string {
