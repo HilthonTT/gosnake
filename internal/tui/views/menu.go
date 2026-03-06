@@ -1,10 +1,9 @@
 package views
 
 import (
-	"errors"
-
 	"github.com/Broderick-Westrope/charmutils"
 	"github.com/HilthonTT/gosnake/internal/tui"
+	"github.com/HilthonTT/gosnake/internal/tui/validate"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -64,12 +63,7 @@ func NewMenuModel(_ *tui.MenuInput) *MenuModel {
 					Title("Username").
 					Placeholder("enter your name...").
 					CharLimit(100).
-					Validate(func(s string) error {
-						if len(s) == 0 {
-							return errors.New("username cannot be empty")
-						}
-						return nil
-					}),
+					Validate(validate.NotEmpty("username")),
 				huh.NewSelect[tui.Mode]().
 					Value(&formData.GameMode).
 					Title("Game Mode:").
@@ -87,7 +81,8 @@ func NewMenuModel(_ *tui.MenuInput) *MenuModel {
 		).
 			WithKeyMap(keys.formKeys).
 			WithTheme(greenTheme()).
-			WithAccessible(true),
+			WithAccessible(true).
+			WithShowHelp(true),
 		keys: keys,
 	}
 }
