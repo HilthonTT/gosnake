@@ -165,3 +165,16 @@ func (g *Game) render() {
 func (g *Game) isSelfCollision(p snake.Point) bool {
 	return slices.Contains(g.snakeBody, p)
 }
+
+func (g *Game) Snapshot() map[string]any {
+	return map[string]any{
+		"score":     g.scoring.Total(),
+		"level":     g.scoring.Level(),
+		"direction": g.direction,
+		"snakeLen":  len(g.snakeBody),
+		"snakeHead": g.snakeBody[0],
+		"food":      g.food,
+		"paused":    g.paused,
+		"gameOver":  g.gameOver,
+	}
+}

@@ -9,11 +9,14 @@ import (
 	"github.com/Broderick-Westrope/charmutils"
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
+	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/views"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+const defaultRecorderSize = 500
 
 type Input struct {
 	mode     tui.Mode
@@ -39,6 +42,8 @@ type Model struct {
 	cfg             *config.Config
 	forceQuitKey    key.Binding
 	leaderboardRepo *data.LeaderboardRepository
+	recorder        *telemetry.Recorder
+	currentMode     tui.Mode
 
 	width  int
 	height int
@@ -52,6 +57,8 @@ func NewModel(in *Input) (*Model, error) {
 		cfg:             in.cfg,
 		leaderboardRepo: data.NewLeaderboardRepository(in.db),
 		forceQuitKey:    key.NewBinding(key.WithKeys(in.cfg.Keys.ForceQuit...)),
+		recorder:        telemetry.NewRecorder(defaultRecorderSize),
+		currentMode:     in.mode,
 	}
 
 	err := m.setChild(in.mode, in.switchIn)
@@ -62,11 +69,32 @@ func NewModel(in *Input) (*Model, error) {
 	return m, nil
 }
 
+func (m *Model) Recorder() *telemetry.Recorder {
+	return m.recorder
+}
+
+func (m *Model) CurrentMode() tui.Mode {
+	return m.currentMode
+}
+
+func (m *Model) TermSize() (int, int) {
+	return m.width, m.height
+}
+
+func (m *Model) GameSnapshot() map[string]any {
+	if sm, ok := m.child.(*views.SingleModel); ok {
+		return sm.GameSnapshot()
+	}
+	return nil
+}
+
 func (m *Model) Init() tea.Cmd {
 	return m.initChild()
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.recorder.Record(msg)
+
 	switch msg := msg.(type) {
 	case tui.FatalErrorMsg:
 		m.ExitError = msg

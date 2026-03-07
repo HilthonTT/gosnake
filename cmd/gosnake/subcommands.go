@@ -6,11 +6,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
+	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/starter"
 	"github.com/HilthonTT/gosnake/server"
@@ -50,7 +52,8 @@ func (c *LeaderboardCmd) Run(globals *GlobalVars) error {
 	return launchStarter(globals, tui.ModeLeaderboard, tui.NewLeaderboardInput())
 }
 
-func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.SwitchModeInput) error {
+func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.SwitchModeInput) (retErr error) {
+
 	db, err := data.NewDB(globals.DB)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
@@ -67,6 +70,31 @@ func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.Switc
 	if err != nil {
 		return fmt.Errorf("creating starter model: %w", err)
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			w, h := model.TermSize()
+
+			report := telemetry.NewCrashReport(
+				r,
+				debug.Stack(),
+				model.Recorder(),
+				w, h,
+				model.CurrentMode().String(),
+				model.GameSnapshot(),
+			)
+
+			path, writeErr := telemetry.WriteCrashReport(report)
+			if writeErr != nil {
+				fmt.Fprintf(os.Stderr, "gosnake crashed: %v\n", r)
+				fmt.Fprintf(os.Stderr, "failed to write crash report: %v\n", writeErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "gosnake crashed — report saved to %s\n", path)
+			}
+
+			retErr = fmt.Errorf("panic: %v", r)
+		}
+	}()
 
 	exitModel, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
 	if err != nil {

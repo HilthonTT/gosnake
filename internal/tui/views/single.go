@@ -10,6 +10,7 @@ import (
 
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/services/leaderboard"
+	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
 	"github.com/HilthonTT/gosnake/pkg/snake"
@@ -451,4 +452,11 @@ func gameModeFromTUI(m tui.Mode) data.GameMode {
 	default:
 		return data.GameModeNormal
 	}
+}
+
+func (m *SingleModel) GameSnapshot() map[string]any {
+	if s, ok := m.game.(telemetry.Snapshottable); ok {
+		return s.Snapshot()
+	}
+	return nil
 }

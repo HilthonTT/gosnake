@@ -26,7 +26,7 @@ func SwitchModeCmd(target Mode, in SwitchModeInput) tea.Cmd {
 type Mode int
 
 const (
-	ModeMenu = Mode(iota)
+	ModeMenu Mode = iota
 	ModeLeaderboard
 	ModeNormal
 	ModeCrazy

@@ -252,3 +252,34 @@ func (g *Game) isActiveBombCollision(p snake.Point) bool {
 	}
 	return false
 }
+
+func (g *Game) Snapshot() map[string]any {
+	snap := map[string]any{
+		"score":     g.scoring.Total(),
+		"level":     g.scoring.Level(),
+		"direction": g.direction,
+		"snakeLen":  len(g.snakeBody),
+		"food":      g.food,
+		"paused":    g.paused,
+		"gameOver":  g.gameOver,
+		"bombCount": len(g.bombs),
+	}
+
+	if len(g.snakeBody) > 0 {
+		snap["snakeHead"] = g.snakeBody[0]
+	}
+
+	activeBombs := 0
+	warningBombs := 0
+	for _, b := range g.bombs {
+		if b.IsActive() {
+			activeBombs++
+		} else if b.IsWarning() {
+			warningBombs++
+		}
+	}
+	snap["activeBombs"] = activeBombs
+	snap["warningBombs"] = warningBombs
+
+	return snap
+}

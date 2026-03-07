@@ -264,3 +264,37 @@ func (g *Game) render() {
 		}
 	}
 }
+
+func (g *Game) Snapshot() map[string]any {
+	playerSnaps := make([]map[string]any, len(g.players))
+	for i, p := range g.players {
+		ps := map[string]any{
+			"index":     p.Index,
+			"name":      p.Name,
+			"score":     p.Score,
+			"direction": p.Direction,
+			"alive":     p.Alive,
+			"length":    len(p.Points),
+		}
+		if len(p.Points) > 0 {
+			ps["head"] = p.Points[0]
+		}
+		playerSnaps[i] = ps
+	}
+
+	foodPts := make([]snake.Point, 0, len(g.food))
+	for _, f := range g.food {
+		if f != nil {
+			foodPts = append(foodPts, *f)
+		}
+	}
+
+	return map[string]any{
+		"players":   playerSnaps,
+		"food":      foodPts,
+		"foodCount": g.foodCount,
+		"level":     g.Level(),
+		"over":      g.over,
+		"winner":    g.winner,
+	}
+}
