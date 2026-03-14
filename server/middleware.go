@@ -2,13 +2,99 @@ package server
 
 import (
 	"log"
+	"net"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/muesli/termenv"
+	"golang.org/x/time/rate"
 )
+
+const (
+	// ipRateLimit is the maximum sustained connection rate allowed per IP.
+	ipRateLimit = rate.Limit(2) // 2 connections per second
+	// ipBurst is the number of connections a single IP can make in a burst.
+	ipBurst = 5
+	// ipLimiterTTL is how long an idle IP limiter is kept before being pruned.
+	ipLimiterTTL = 5 * time.Minute
+	// globalRateLimit is the maximum sustained connection rate across all IPs.
+	globalRateLimit = rate.Limit(10) // 10 connections per second
+	// globalBurst is the global burst allowance.
+	globalBurst = 20
+	// globalMaxSessions is the maximum number of concurrent SSH sessions.
+	globalMaxSessions = 100
+)
+
+type ipEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+type ipRateLimiter struct {
+	mu      sync.Mutex
+	entries map[string]*ipEntry
+}
+
+func newIPRateLimiter() *ipRateLimiter {
+	rl := &ipRateLimiter{
+		entries: make(map[string]*ipEntry),
+	}
+	go rl.pruneLoop()
+	return rl
+}
+
+func (rl *ipRateLimiter) limiterFor(ip string) *rate.Limiter {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	e, ok := rl.entries[ip]
+	if !ok {
+		e = &ipEntry{limiter: rate.NewLimiter(ipRateLimit, ipBurst)}
+		rl.entries[ip] = e
+	}
+	e.lastSeen = time.Now()
+	return e.limiter
+}
+
+func (rl *ipRateLimiter) pruneLoop() {
+	ticker := time.NewTicker(ipLimiterTTL / 2)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		rl.mu.Lock()
+		cutoff := time.Now().Add(-ipLimiterTTL)
+		for ip, e := range rl.entries {
+			if e.lastSeen.Before(cutoff) {
+				delete(rl.entries, ip)
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+func perIPMiddleware(rl *ipRateLimiter) wish.Middleware {
+	return func(next ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			remoteAddr := s.RemoteAddr().String()
+			ip, _, err := net.SplitHostPort(remoteAddr)
+			if err != nil {
+				ip = remoteAddr
+			}
+
+			if !rl.limiterFor(ip).Allow() {
+				log.Printf("rate limit exceeded for IP %s — closing connection", ip)
+				_ = s.Exit(1)
+				return
+			}
+
+			next(s)
+		}
+	}
+}
 
 // multiMiddleware is the wish middleware that handles all incoming SSH sessions.
 // It parses the command arguments to find a room ID and optional password,

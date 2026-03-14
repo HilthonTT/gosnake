@@ -12,6 +12,8 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/activeterm"
 	"github.com/charmbracelet/wish/logging"
+	"github.com/charmbracelet/wish/ratelimiter"
+	"github.com/charmbracelet/wish/recover"
 )
 
 // PublicKey wraps ssh.PublicKey and provides a stable string key for maps.
@@ -43,6 +45,9 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 		rooms: make(map[string]*Room),
 	}
 
+	globalRL := ratelimiter.NewRateLimiter(globalRateLimit, globalBurst, globalMaxSessions)
+	ipRL := newIPRateLimiter()
+
 	ws, err := wish.NewServer(
 		// Accept any password and any public key — room passwords handle auth.
 		ssh.PasswordAuth(func(_ ssh.Context, _ string) bool { return true }),
@@ -53,6 +58,9 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 			multiMiddleware(s),
 			activeterm.Middleware(),
 			logging.Middleware(),
+			recover.Middleware(),
+			perIPMiddleware(ipRL),
+			ratelimiter.Middleware(globalRL),
 		),
 	)
 
@@ -66,6 +74,7 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 
 // Start begins serving SSH connections. It blocks until the server stops.
 func (s *Server) Start() error {
+	log.Printf("SSH server listening on %s:%d", s.host, s.port)
 	return s.srv.ListenAndServe()
 }
 
