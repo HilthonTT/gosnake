@@ -6,15 +6,20 @@ import (
 )
 
 type menuKeyMap struct {
-	Exit     key.Binding
-	formKeys *huh.KeyMap
+	Exit        key.Binding
+	Leaderboard key.Binding
+	formKeys    *huh.KeyMap
 }
 
 func defaultMenuKeyMap() *menuKeyMap {
 	keys := &menuKeyMap{
 		Exit: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("escape", "exit"),
+			key.WithHelp("esc", "quit"),
+		),
+		Leaderboard: key.NewBinding(
+			key.WithKeys("ctrl+l"),
+			key.WithHelp("ctrl+l", "leaderboard"),
 		),
 		formKeys: huh.NewDefaultKeyMap(),
 	}

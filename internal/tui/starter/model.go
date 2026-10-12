@@ -72,6 +72,10 @@ type Model struct {
 	currentMode     tui.Mode
 	crash           *Crash
 
+	// lastPlay remembers the most recent game's settings so the menu can
+	// pre-fill them and the leaderboard can offer a replay.
+	lastPlay *tui.SingleInput
+
 	width  int
 	height int
 
@@ -194,6 +198,9 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 		if !ok {
 			return fmt.Errorf("switchIn is not a MenuInput: %w", errInvalidInput)
 		}
+		if menuIn.Username == "" && m.lastPlay != nil {
+			menuIn.Username, menuIn.Mode, menuIn.Level = m.lastPlay.Username, m.lastPlay.Mode, m.lastPlay.Level
+		}
 		m.child = views.NewMenuModel(menuIn)
 
 	case tui.ModeNormal, tui.ModeCrazy, tui.ModeAI:
@@ -210,6 +217,7 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 			return fmt.Errorf("creating single model: %w", err)
 		}
 		m.child = child
+		m.lastPlay = singleIn
 
 	case tui.ModeLeaderboard:
 		leaderboardIn, ok := switchIn.(*tui.LeaderboardInput)
@@ -218,6 +226,9 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 		}
 		if err := m.prepareLeaderboard(leaderboardIn); err != nil {
 			return err
+		}
+		if leaderboardIn.Replay == nil {
+			leaderboardIn.Replay = m.lastPlay
 		}
 		m.child = views.NewLeaderboardModel(leaderboardIn)
 

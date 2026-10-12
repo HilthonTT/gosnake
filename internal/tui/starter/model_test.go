@@ -106,11 +106,11 @@ func TestViewsRenderInAltScreen(t *testing.T) {
 		in   tui.SwitchModeInput
 		want string
 	}{
-		{"menu", tui.ModeMenu, tui.NewMenuInput(), "eat, grow, survive"},
+		{"menu", tui.ModeMenu, tui.NewMenuInput(), "eat · grow · survive"},
 		{"normal", tui.ModeNormal, tui.NewSingleInput(tui.ModeNormal, 1, "t"), "NORMAL"},
 		{"crazy", tui.ModeCrazy, tui.NewSingleInput(tui.ModeCrazy, 1, "t"), "CRAZY"},
 		{"ai", tui.ModeAI, tui.NewSingleInput(tui.ModeAI, 1, "t"), "VS AI"},
-		{"leaderboard", tui.ModeLeaderboard, tui.NewLeaderboardInput(), "sorted by"},
+		{"leaderboard", tui.ModeLeaderboard, tui.NewLeaderboardInput(), "L E A D E R B O A R D"},
 	}
 
 	for _, tc := range cases {
@@ -127,6 +127,35 @@ func TestViewsRenderInAltScreen(t *testing.T) {
 				t.Errorf("view does not contain %q", tc.want)
 			}
 		})
+	}
+}
+
+func TestMenuRemembersLastGame(t *testing.T) {
+	m := newTestModel(t, tui.ModeCrazy, tui.NewSingleInput(tui.ModeCrazy, 4, "hans"))
+
+	m.Update(tui.SwitchModeMsg{Target: tui.ModeLeaderboard, Input: tui.NewLeaderboardInput()})
+	m.Update(tui.SwitchModeMsg{Target: tui.ModeMenu, Input: tui.NewMenuInput()})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 45})
+
+	if v := m.View().Content; !strings.Contains(v, "hans") {
+		t.Error("menu should pre-fill the last player name")
+	}
+}
+
+func TestLeaderboardOffersReplay(t *testing.T) {
+	m := newTestModel(t, tui.ModeNormal, tui.NewSingleInput(tui.ModeNormal, 2, "hans"))
+	m.Update(tui.SwitchModeMsg{Target: tui.ModeLeaderboard, Input: tui.NewLeaderboardInput()})
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter should start a replay")
+	}
+	msg, ok := cmd().(tui.SwitchModeMsg)
+	if !ok || msg.Target != tui.ModeNormal {
+		t.Fatalf("got %#v, want a switch to the normal game", msg)
+	}
+	if in := msg.Input.(*tui.SingleInput); in.Level != 2 || in.Username != "hans" {
+		t.Fatalf("replay input = %+v", in)
 	}
 }
 

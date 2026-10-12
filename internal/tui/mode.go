@@ -46,7 +46,12 @@ func (m Mode) String() string {
 	return modeToStrMap[m]
 }
 
-type MenuInput struct{}
+// MenuInput pre-fills the menu form; zero values fall back to defaults.
+type MenuInput struct {
+	Username string
+	Mode     Mode
+	Level    int
+}
 
 func NewMenuInput() *MenuInput {
 	return &MenuInput{}
@@ -73,6 +78,9 @@ func (in *SingleInput) isSwitchModeInput() {}
 type LeaderboardInput struct {
 	NewEntry *data.LeaderboardEntry
 	Entries  []data.LeaderboardEntry
+
+	// Replay, when set, lets the player start the same game again directly.
+	Replay *SingleInput
 }
 
 func NewLeaderboardInput(opts ...func(input *LeaderboardInput)) *LeaderboardInput {
