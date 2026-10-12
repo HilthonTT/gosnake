@@ -2,16 +2,18 @@ package server
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
+
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/HilthonTT/gosnake/pkg/snake"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/multi"
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-const (
+var (
 	colP0Head  = lipgloss.Color("82")  // bright lime — player 0
 	colP0Body  = lipgloss.Color("40")  // medium green
 	colP1Head  = lipgloss.Color("39")  // bright cyan — player 1
@@ -79,8 +81,8 @@ func newMultiStyles() multiStyles {
 	}
 
 	// Per-player head / body styles.
-	headColors := [multi.MaxPlayers]lipgloss.Color{colP0Head, colP1Head, colP2Head}
-	bodyColors := [multi.MaxPlayers]lipgloss.Color{colP0Body, colP1Body, colP2Body}
+	headColors := [multi.MaxPlayers]color.Color{colP0Head, colP1Head, colP2Head}
+	bodyColors := [multi.MaxPlayers]color.Color{colP0Body, colP1Body, colP2Body}
 	for i := range s.heads {
 		s.heads[i] = lipgloss.NewStyle().Foreground(headColors[i]).Bold(true)
 		s.bodies[i] = lipgloss.NewStyle().Foreground(bodyColors[i])
@@ -160,9 +162,9 @@ func (m *SharedMultiGame) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case GameStateMsg:
 		// Detect if this player died this tick.
-		if m.player.playerIndex >= 0 && !m.myDead {
-			for _, idx := range msg.Died {
-				if idx == m.player.playerIndex {
+		if idx := m.player.Index(); idx >= 0 && !m.myDead {
+			for _, died := range msg.Died {
+				if died == idx {
 					m.myDead = true
 					break
 				}
@@ -177,7 +179,7 @@ func (m *SharedMultiGame) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.myDead = false
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if key.Matches(msg, m.keys.ForceQuit) || key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
 		}
@@ -188,7 +190,7 @@ func (m *SharedMultiGame) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleKey routes keyboard input depending on current game state.
-func (m *SharedMultiGame) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *SharedMultiGame) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Game over — only restart is meaningful.
 	if m.lastState != nil && m.lastState.Over {
 		if key.Matches(msg, m.keys.Restart) {
@@ -198,12 +200,12 @@ func (m *SharedMultiGame) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Observers and dead players cannot steer.
-	if m.player.playerIndex < 0 || m.myDead {
+	idx := m.player.Index()
+	if idx < 0 || m.myDead {
 		return m, nil
 	}
 
 	// Active player — send direction changes to the room.
-	idx := m.player.playerIndex
 	switch {
 	case key.Matches(msg, m.keys.Up):
 		m.sendToRoom(DirectionMsg{PlayerIndex: idx, Direction: int(snake.Up)})
@@ -218,13 +220,23 @@ func (m *SharedMultiGame) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // sendToRoom sends a message to the room's sync channel without blocking.
+// If the room is saturated (or already closed) the input is dropped rather
+// than leaking a goroutine per key press.
 func (m *SharedMultiGame) sendToRoom(msg tea.Msg) {
-	go func() {
-		m.sync <- msg
-	}()
+	select {
+	case m.sync <- msg:
+	default:
+	}
 }
 
-func (m *SharedMultiGame) View() string {
+func (m *SharedMultiGame) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	v.WindowTitle = "GoSnake — room " + m.player.room.id
+	return v
+}
+
+func (m *SharedMultiGame) render() string {
 	if m.lastState == nil {
 		v := m.waitingView()
 		return v
@@ -309,7 +321,7 @@ func (m *SharedMultiGame) gameOverMsg(state *GameStateMsg) string {
 	switch state.Winner {
 	case -1:
 		title = "DRAW — everyone died!"
-	case m.player.playerIndex:
+	case m.player.Index():
 		title = "🏆  YOU WIN!"
 	default:
 		// Find winner name from snapshots.
@@ -387,7 +399,7 @@ func (m *SharedMultiGame) infoView() string {
 
 	// Player rows.
 	var playerRows []string
-	playerColors := [multi.MaxPlayers]lipgloss.Color{colP0Head, colP1Head, colP2Head}
+	playerColors := [multi.MaxPlayers]color.Color{colP0Head, colP1Head, colP2Head}
 	for _, snap := range state.Players {
 		marker := "●"
 		style := lipgloss.NewStyle().Foreground(playerColors[snap.Index]).Bold(true)
@@ -397,7 +409,7 @@ func (m *SharedMultiGame) infoView() string {
 		}
 
 		tag := ""
-		if snap.Index == m.player.playerIndex {
+		if snap.Index == m.player.Index() {
 			tag = " ◀ you"
 		}
 

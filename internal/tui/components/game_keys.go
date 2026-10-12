@@ -1,8 +1,12 @@
 package components
 
 import (
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
+	"strings"
+
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+
+	"github.com/HilthonTT/gosnake/internal/config"
 )
 
 var _ help.KeyMap = (*GameKeyMap)(nil)
@@ -19,42 +23,50 @@ type GameKeyMap struct {
 	Help      key.Binding
 }
 
-// NewGameKeyMap returns the default key map.
-func NewGameKeyMap() *GameKeyMap {
-	return &GameKeyMap{
-		Up: key.NewBinding(
-			key.WithKeys("up", "w", "k"),
-			key.WithHelp("↑/w", "up"),
-		),
-		Down: key.NewBinding(
-			key.WithKeys("down", "s", "j"),
-			key.WithHelp("↓/s", "down"),
-		),
-		Left: key.NewBinding(
-			key.WithKeys("left", "a", "h"),
-			key.WithHelp("←/a", "left"),
-		),
-		Right: key.NewBinding(
-			key.WithKeys("right", "d", "l"),
-			key.WithHelp("→/d", "right"),
-		),
-		Pause: key.NewBinding(
-			key.WithKeys("p", "esc"),
-			key.WithHelp("p", "pause"),
-		),
-		Quit: key.NewBinding(
-			key.WithKeys("q"),
-			key.WithHelp("q", "quit"),
-		),
-		ForceQuit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "force quit"),
-		),
-		Help: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
-		),
+// NewGameKeyMap builds the game key map from the user's configured keys.
+// A nil keys uses the defaults.
+func NewGameKeyMap(keys *config.Keys) *GameKeyMap {
+	if keys == nil {
+		keys = config.DefaultKeys()
 	}
+
+	return &GameKeyMap{
+		Up:        NewBinding(keys.Up, "up"),
+		Down:      NewBinding(keys.Down, "down"),
+		Left:      NewBinding(keys.Left, "left"),
+		Right:     NewBinding(keys.Right, "right"),
+		Pause:     NewBinding(keys.Pause, "pause"),
+		Quit:      NewBinding(keys.Quit, "quit"),
+		ForceQuit: NewBinding(keys.ForceQuit, "force quit"),
+		Help:      NewBinding(keys.Help, "help"),
+	}
+}
+
+// NewBinding creates a binding whose help text lists every key.
+func NewBinding(keys []string, desc string) key.Binding {
+	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(KeyLabel(keys), desc))
+}
+
+// KeyLabel renders key names for help text, e.g. ["up","w"] -> "↑/w".
+func KeyLabel(keys []string) string {
+	labels := make([]string, len(keys))
+	for i, k := range keys {
+		switch k {
+		case "up":
+			labels[i] = "↑"
+		case "down":
+			labels[i] = "↓"
+		case "left":
+			labels[i] = "←"
+		case "right":
+			labels[i] = "→"
+		case " ", "space":
+			labels[i] = "space"
+		default:
+			labels[i] = k
+		}
+	}
+	return strings.Join(labels, "/")
 }
 
 // ShortHelp satisfies help.KeyMap.

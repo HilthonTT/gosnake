@@ -12,7 +12,9 @@ internal sealed class SubmitScoreRequestValidator : AbstractValidator<SubmitScor
 
         RuleFor(x => x.PlayerName)
             .NotEmpty()
-            .WithMessage("Player name is required.");
+            .WithMessage("Player name is required.")
+            .MaximumLength(32)
+            .WithMessage("Player name must be at most 32 characters.");
 
         RuleFor(x => x.Level)
             .InclusiveBetween(1, 10)

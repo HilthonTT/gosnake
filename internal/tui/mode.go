@@ -1,8 +1,9 @@
 package tui
 
 import (
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/HilthonTT/gosnake/internal/data"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 type SwitchModeMsg struct {
@@ -38,7 +39,7 @@ var modeToStrMap = map[Mode]string{
 	ModeLeaderboard: "Leaderboard",
 	ModeNormal:      "Normal",
 	ModeCrazy:       "Crazy",
-	ModeAI:          "ModeAI",
+	ModeAI:          "AI",
 }
 
 func (m Mode) String() string {

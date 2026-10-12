@@ -1,0 +1,11 @@
+.git
+.github
+Tips.Api
+Tips.Api.Tests
+assets
+dist
+bin
+obj
+*.db
+*.log
+gosnake_server*

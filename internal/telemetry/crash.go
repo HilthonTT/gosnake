@@ -11,7 +11,10 @@ import (
 	"github.com/adrg/xdg"
 )
 
-const Version = "dev"
+// Version is the build version, set at link time:
+//
+//	go build -ldflags "-X github.com/HilthonTT/gosnake/internal/telemetry.Version=v1.2.3"
+var Version = "dev"
 
 type CrashReport struct {
 	Timestamp  string            `json:"timestamp"`
@@ -29,6 +32,8 @@ type CrashReport struct {
 	Extra      map[string]string `json:"extra,omitempty"`
 }
 
+// Snapshottable is implemented by game state that can describe itself for a
+// crash report.
 type Snapshottable interface {
 	Snapshot() map[string]any
 }
@@ -65,15 +70,17 @@ func NewCrashReport(
 func WriteCrashReport(report *CrashReport) (string, error) {
 	dir, err := xdg.DataFile("gosnake/crashes/.keep")
 	if err != nil {
-		return "", fmt.Errorf("resolve crash direction: %w", err)
+		return "", fmt.Errorf("resolve crash directory: %w", err)
 	}
 	dir = filepath.Dir(dir)
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("create crash directory: %w", err)
 	}
 
-	filename := fmt.Sprintf("crash-%s.json", time.Now().UTC().Format("20060102-150405"))
+	// Include milliseconds and the PID so two crashes in the same second
+	// don't overwrite each other.
+	filename := fmt.Sprintf("crash-%s-%d.json", time.Now().UTC().Format("20060102-150405.000"), os.Getpid())
 	path := filepath.Join(dir, filename)
 
 	data, err := json.MarshalIndent(report, "", "  ")
@@ -81,7 +88,7 @@ func WriteCrashReport(report *CrashReport) (string, error) {
 		return "", fmt.Errorf("marshal crash report: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("write crash report: %w", err)
 	}
 

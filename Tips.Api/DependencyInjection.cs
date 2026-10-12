@@ -1,9 +1,11 @@
-﻿using Asp.Versioning;
+using Asp.Versioning;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Tips.Api.Middleware;
+using Tips.Api.Models;
 using Tips.Api.Realtime;
 using Tips.Api.Repositories;
 using Tips.Api.Repositories.Interfaces;
@@ -13,25 +15,31 @@ namespace Tips.Api;
 
 public static class DependencyInjection
 {
+    internal const string SubmitRateLimitPolicy = "submit";
+
     public static WebApplicationBuilder AddApplicationServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddValidatorsFromAssemblyContaining<Program>(includeInternalTypes: true);
 
-        builder.Services.AddResponseCaching();
+        // Enums go over the wire as names ("EntryAdded", "Beginner"), which is
+        // what the Go client expects and what query parameters already accept.
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-        builder.Services.AddOpenApi();
+        builder.Services.AddOutputCache();
         builder.Services.AddHealthChecks();
         builder.Services.AddMetrics();
-
-        builder.Services.AddEndpointsApiExplorer();
-        builder.Services.AddSwaggerGen();
+        builder.Services.AddSingleton(TimeProvider.System);
 
         builder.Services.AddSingleton<ITipRepository, InMemoryTipRepository>();
         builder.Services.AddSingleton<ILeaderboardRepository, InMemoryLeaderboardRepository>();
-        builder.Services.AddSingleton<LeaderboardBroadcastManager>();
-        builder.Services.AddSingleton<LeaderboardEventBuffer>();
-        builder.Services.AddSingleton<BroadcastManager>();
-        builder.Services.AddSingleton<TipEventBuffer>();
+
+        builder.Services.AddSingleton(new SseBroadcasterOptions(
+            Name: "Tips", EventType: "tip", ChannelCapacity: 20, ReplayBufferSize: 50));
+        builder.Services.AddSingleton(new SseBroadcasterOptions(
+            Name: "Leaderboard", EventType: "leaderboard-change", ChannelCapacity: 50, ReplayBufferSize: 100));
+        builder.Services.AddSingleton(sp => CreateBroadcaster<GameTip>(sp, "Tips"));
+        builder.Services.AddSingleton(sp => CreateBroadcaster<LeaderboardChangeEvent>(sp, "Leaderboard"));
 
         builder.Services.AddApiVersioning(options =>
         {
@@ -41,7 +49,7 @@ public static class DependencyInjection
         {
             options.GroupNameFormat = "'v'V";
             options.SubstituteApiVersionInUrl = true;
-        });
+        }).AddOpenApi();
 
         return builder;
     }
@@ -61,7 +69,6 @@ public static class DependencyInjection
         return builder;
     }
 
-
     public static WebApplicationBuilder AddBackgroundJobs(this WebApplicationBuilder builder)
     {
         builder.Services.AddHostedService<TipsProducerService>();
@@ -71,14 +78,20 @@ public static class DependencyInjection
 
     public static WebApplicationBuilder AddCorsPolicy(this WebApplicationBuilder builder)
     {
-        CorsOptions corsOptions = builder.Configuration.GetSection(CorsOptions.SectionName).Get<CorsOptions>()!;
+        string[] allowedOrigins = builder.Configuration
+            .GetSection(CorsOptions.SectionName)
+            .Get<CorsOptions>()?
+            .AllowedOrigins
+            .Where(origin => !string.IsNullOrWhiteSpace(origin))
+            .ToArray() ?? [];
 
         builder.Services.AddCors(options =>
         {
             options.AddPolicy(CorsOptions.PolicyName, policy =>
             {
+                // With no configured origins the policy allows nothing cross-origin.
                 policy
-                    .WithOrigins(corsOptions.AllowedOrigins)
+                    .WithOrigins(allowedOrigins)
                     .AllowAnyMethod()
                     .AllowAnyHeader();
             });
@@ -94,29 +107,39 @@ public static class DependencyInjection
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             options.OnRejected = async (context, token) =>
             {
+                string detail = "Too many requests. Please try again later.";
                 if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
                 {
-                    context.HttpContext.Response.Headers.RetryAfter = $"{retryAfter.TotalSeconds}";
-                    ProblemDetailsFactory problemDetailsFactory = context.HttpContext.RequestServices.GetRequiredService<ProblemDetailsFactory>();
-                    ProblemDetails problemDetails = problemDetailsFactory.CreateProblemDetails(
-                        context.HttpContext,
-                        StatusCodes.Status429TooManyRequests, "Too Many Requests",
-                        detail: $"Too many requests. Please try again after {retryAfter.TotalSeconds} seconds.");
-                    await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, token);
+                    context.HttpContext.Response.Headers.RetryAfter = $"{(int)Math.Ceiling(retryAfter.TotalSeconds)}";
+                    detail = $"Too many requests. Please try again after {retryAfter.TotalSeconds:0} seconds.";
                 }
+
+                ProblemDetailsFactory problemDetailsFactory =
+                    context.HttpContext.RequestServices.GetRequiredService<ProblemDetailsFactory>();
+                ProblemDetails problemDetails = problemDetailsFactory.CreateProblemDetails(
+                    context.HttpContext,
+                    StatusCodes.Status429TooManyRequests,
+                    "Too Many Requests",
+                    detail: detail);
+                await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, token);
             };
 
-            options.AddPolicy("default", context =>
-            {
-                return RateLimitPartition.GetFixedWindowLimiter("anonymous", _ =>
-                    new FixedWindowRateLimiterOptions
+            // Partition per client IP so one noisy client cannot lock everybody out.
+            options.AddPolicy(SubmitRateLimitPolicy, context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 5,
-                        Window = TimeSpan.FromMinutes(1)
-                    });
-            });
+                        Window = TimeSpan.FromMinutes(1),
+                    }));
         });
 
         return builder;
     }
+
+    private static SseBroadcaster<T> CreateBroadcaster<T>(IServiceProvider sp, string name) =>
+        ActivatorUtilities.CreateInstance<SseBroadcaster<T>>(
+            sp,
+            sp.GetServices<SseBroadcasterOptions>().Single(o => o.Name == name));
 }

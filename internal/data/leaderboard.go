@@ -11,7 +11,9 @@ type GameMode string
 const (
 	GameModeNormal GameMode = "normal"
 	GameModeCrazy  GameMode = "crazy"
-	GameModeAI     GameMode = "AI"
+	// GameModeAI keeps its historical upper-case value so existing rows still
+	// group together.
+	GameModeAI GameMode = "AI"
 )
 
 type LeaderboardEntry struct {
@@ -31,6 +33,8 @@ func NewLeaderboardRepository(db *sql.DB) *LeaderboardRepository {
 	return &LeaderboardRepository{db}
 }
 
+const selectEntries = `SELECT id, name, score, level, mode, created_at FROM leaderboard`
+
 func (r *LeaderboardRepository) Save(name string, score, level int, mode GameMode) (int, error) {
 	const query = `
 		INSERT INTO leaderboard (name, score, level, mode)
@@ -49,121 +53,24 @@ func (r *LeaderboardRepository) Save(name string, score, level int, mode GameMod
 	return int(id), nil
 }
 
+// All returns every entry, best score first.
 func (r *LeaderboardRepository) All() ([]LeaderboardEntry, error) {
-	const query = `
-		SELECT id, name, score, level, mode, created_at
-		FROM leaderboard
-		ORDER BY score DESC
-	`
-
-	rows, err := r.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query leaderboard: %w", err)
-	}
-	defer rows.Close()
-
-	var entries []LeaderboardEntry
-	for rows.Next() {
-		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
-		}
-		entries = append(entries, e)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("leaderboard row iteration error: %w", err)
-	}
-
-	return entries, nil
+	return r.query(selectEntries + ` ORDER BY score DESC`)
 }
 
+// GetTopN returns the n best entries.
 func (r *LeaderboardRepository) GetTopN(n int) ([]LeaderboardEntry, error) {
-	const query = `
-		SELECT id, name, score, level, mode, created_at
-		FROM leaderboard
-		ORDER BY score DESC
-		LIMIT ?
-	`
-	rows, err := r.db.Query(query, n)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query leaderboard: %w", err)
-	}
-	defer rows.Close()
-
-	var entries []LeaderboardEntry
-	for rows.Next() {
-		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
-		}
-		entries = append(entries, e)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("leaderboard row iteration error: %w", err)
-	}
-
-	return entries, nil
+	return r.query(selectEntries+` ORDER BY score DESC LIMIT ?`, n)
 }
 
+// GetTopNByMode returns the n best entries for a single game mode.
 func (r *LeaderboardRepository) GetTopNByMode(n int, mode GameMode) ([]LeaderboardEntry, error) {
-	const query = `
-		SELECT id, name, score, level, mode, created_at
-		FROM leaderboard
-		WHERE mode = ?
-		ORDER BY score DESC
-		LIMIT ?
-	`
-	rows, err := r.db.Query(query, mode, n)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query leaderboard by mode: %w", err)
-	}
-	defer rows.Close()
-
-	var entries []LeaderboardEntry
-	for rows.Next() {
-		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
-		}
-		entries = append(entries, e)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("leaderboard row iteration error: %w", err)
-	}
-
-	return entries, nil
+	return r.query(selectEntries+` WHERE mode = ? ORDER BY score DESC LIMIT ?`, mode, n)
 }
 
+// GetByName returns every entry for a player, best score first.
 func (r *LeaderboardRepository) GetByName(name string) ([]LeaderboardEntry, error) {
-	const query = `
-		SELECT id, name, score, level, mode, created_at
-		FROM leaderboard
-		WHERE name = ?
-		ORDER BY score DESC
-	`
-	rows, err := r.db.Query(query, name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query leaderboard by name: %w", err)
-	}
-	defer rows.Close()
-
-	var entries []LeaderboardEntry
-	for rows.Next() {
-		var e LeaderboardEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
-		}
-		entries = append(entries, e)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("leaderboard row iteration error: %w", err)
-	}
-
-	return entries, nil
+	return r.query(selectEntries+` WHERE name = ? ORDER BY score DESC`, name)
 }
 
 func (r *LeaderboardRepository) Delete(id int) error {
@@ -182,4 +89,27 @@ func (r *LeaderboardRepository) Delete(id int) error {
 	}
 
 	return nil
+}
+
+func (r *LeaderboardRepository) query(query string, args ...any) ([]LeaderboardEntry, error) {
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query leaderboard: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []LeaderboardEntry
+	for rows.Next() {
+		var e LeaderboardEntry
+		if err := rows.Scan(&e.ID, &e.Name, &e.Score, &e.Level, &e.Mode, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan leaderboard entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("leaderboard row iteration error: %w", err)
+	}
+
+	return entries, nil
 }

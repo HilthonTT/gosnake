@@ -1,7 +1,8 @@
 package ai
 
 import (
-	"math/rand"
+	"maps"
+	"math/rand/v2"
 
 	"github.com/HilthonTT/gosnake/pkg/snake"
 )
@@ -50,6 +51,9 @@ const (
 	wallOffRange = 6
 )
 
+// occupancy is the set of cells the pathfinder treats as walls.
+type occupancy = map[snake.Point]struct{}
+
 // aiState tracks per-tick mutable decisions so the caller (Game.Tick) can
 // persist it across ticks. Currently tracks consecutive tail-chase ticks.
 type aiState struct {
@@ -86,7 +90,7 @@ func nextDirection(
 	playerHead snake.Point,
 	playerDir snake.Direction,
 	current snake.Direction,
-	occupied map[snake.Point]any,
+	occupied occupancy,
 	aiBody []snake.Point,
 	level int,
 	state *aiState,
@@ -188,13 +192,13 @@ func nextDirection(
 
 // safeBFS finds the shortest path from src to dst and then verifies the first
 // step leaves at least minSafe reachable cells (flood-fill).
-func safeBFS(src, dst snake.Point, occupied map[snake.Point]any, minSafe int) (snake.Direction, bool) {
+func safeBFS(src, dst snake.Point, occupied occupancy, minSafe int) (snake.Direction, bool) {
 	dir, ok := bfs(src, dst, occupied)
 	if !ok {
 		return 0, false
 	}
 
-	next := step(src, dir)
+	next := src.Step(dir)
 	simOccupied := copyOccupied(occupied)
 	simOccupied[src] = struct{}{}
 
@@ -211,18 +215,17 @@ func safeBFS(src, dst snake.Point, occupied map[snake.Point]any, minSafe int) (s
 func largestFloodDir(
 	head snake.Point,
 	current snake.Direction,
-	occupied map[snake.Point]any,
+	occupied occupancy,
 ) (snake.Direction, bool) {
-	bounds := snake.NewMatrix(snake.DefaultRows, snake.DefaultCols)
-	dirs := []snake.Direction{snake.Up, snake.Down, snake.Left, snake.Right}
+	dirs := snake.Directions
 
 	bestDir := current
 	bestCount := -1
 	found := false
 
 	for _, d := range dirs {
-		nb := step(head, d)
-		if !bounds.InBounds(nb) {
+		nb := head.Step(d)
+		if !snake.InBoard(nb) {
 			continue
 		}
 		if _, blocked := occupied[nb]; blocked {
@@ -245,10 +248,9 @@ func largestFloodDir(
 
 // floodFill counts how many cells are reachable from start without crossing
 // any point in occupied or leaving the board.
-func floodFill(start snake.Point, occupied map[snake.Point]any) int {
-	bounds := snake.NewMatrix(snake.DefaultRows, snake.DefaultCols)
+func floodFill(start snake.Point, occupied occupancy) int {
 
-	if !bounds.InBounds(start) {
+	if !snake.InBoard(start) {
 		return 0
 	}
 	if _, blocked := occupied[start]; blocked {
@@ -265,9 +267,9 @@ func floodFill(start snake.Point, occupied map[snake.Point]any) int {
 		queue = queue[1:]
 		count++
 
-		for _, d := range []snake.Direction{snake.Up, snake.Down, snake.Left, snake.Right} {
-			nb := step(cur, d)
-			if !bounds.InBounds(nb) {
+		for _, d := range snake.Directions {
+			nb := cur.Step(d)
+			if !snake.InBoard(nb) {
 				continue
 			}
 			if _, seen := visited[nb]; seen {
@@ -290,14 +292,13 @@ func predictPlayerPos(
 	playerHead snake.Point,
 	playerDir snake.Direction,
 	n int,
-	occupied map[snake.Point]any,
+	occupied occupancy,
 ) snake.Point {
-	bounds := snake.NewMatrix(snake.DefaultRows, snake.DefaultCols)
 	pos := playerHead
 
 	for i := 0; i < n; i++ {
-		next := step(pos, playerDir)
-		if !bounds.InBounds(next) {
+		next := pos.Step(playerDir)
+		if !snake.InBoard(next) {
 			break
 		}
 		if _, blocked := occupied[next]; blocked {
@@ -314,20 +315,18 @@ func predictPlayerPos(
 
 // bfs performs a breadth-first search from src to dst, treating every point
 // in occupied as a wall.
-func bfs(src, dst snake.Point, occupied map[snake.Point]any) (snake.Direction, bool) {
+func bfs(src, dst snake.Point, occupied occupancy) (snake.Direction, bool) {
 	type state struct {
 		pt       snake.Point
 		firstDir snake.Direction
 	}
 
-	bounds := snake.NewMatrix(snake.DefaultRows, snake.DefaultCols)
-
 	visited := map[snake.Point]struct{}{src: {}}
 	queue := []state{}
 
-	for _, dir := range []snake.Direction{snake.Up, snake.Down, snake.Left, snake.Right} {
-		nb := step(src, dir)
-		if !bounds.InBounds(nb) {
+	for _, dir := range snake.Directions {
+		nb := src.Step(dir)
+		if !snake.InBoard(nb) {
 			continue
 		}
 		if _, blocked := occupied[nb]; blocked {
@@ -346,9 +345,9 @@ func bfs(src, dst snake.Point, occupied map[snake.Point]any) (snake.Direction, b
 			return cur.firstDir, true
 		}
 
-		for _, dir := range []snake.Direction{snake.Up, snake.Down, snake.Left, snake.Right} {
-			nb := step(cur.pt, dir)
-			if !bounds.InBounds(nb) {
+		for _, dir := range snake.Directions {
+			nb := cur.pt.Step(dir)
+			if !snake.InBoard(nb) {
 				continue
 			}
 			if _, seen := visited[nb]; seen {
@@ -365,23 +364,9 @@ func bfs(src, dst snake.Point, occupied map[snake.Point]any) (snake.Direction, b
 	return 0, false
 }
 
-// step returns the point one cell in direction d from p.
-func step(p snake.Point, d snake.Direction) snake.Point {
-	switch d {
-	case snake.Up:
-		return snake.Point{X: p.X, Y: p.Y - 1}
-	case snake.Down:
-		return snake.Point{X: p.X, Y: p.Y + 1}
-	case snake.Left:
-		return snake.Point{X: p.X - 1, Y: p.Y}
-	default: // Right
-		return snake.Point{X: p.X + 1, Y: p.Y}
-	}
-}
-
 // occupiedSet builds the map used by the pathfinder from raw point slices.
-func occupiedSet(playerBody, aiBody []snake.Point) map[snake.Point]any {
-	set := make(map[snake.Point]any, len(playerBody)+len(aiBody))
+func occupiedSet(playerBody, aiBody []snake.Point) occupancy {
+	set := make(occupancy, len(playerBody)+len(aiBody))
 
 	for _, p := range playerBody {
 		set[p] = struct{}{}
@@ -414,15 +399,13 @@ func manhattanDist(a, b snake.Point) int {
 func randomSafeDirection(
 	head snake.Point,
 	current snake.Direction,
-	occupied map[snake.Point]any,
+	occupied occupancy,
 ) (snake.Direction, bool) {
-	dirs := []snake.Direction{snake.Up, snake.Down, snake.Left, snake.Right}
+	dirs := snake.Directions
 	rand.Shuffle(len(dirs), func(i, j int) { dirs[i], dirs[j] = dirs[j], dirs[i] })
-
-	bounds := snake.NewMatrix(snake.DefaultRows, snake.DefaultCols)
 	for _, d := range dirs {
-		nb := step(head, d)
-		if !bounds.InBounds(nb) {
+		nb := head.Step(d)
+		if !snake.InBoard(nb) {
 			continue
 		}
 		if _, blocked := occupied[nb]; blocked {
@@ -433,11 +416,9 @@ func randomSafeDirection(
 	return current, false
 }
 
-// copyOccupied returns a shallow copy of an occupied map.
-func copyOccupied(src map[snake.Point]any) map[snake.Point]any {
-	dst := make(map[snake.Point]any, len(src)+4)
-	for k, v := range src {
-		dst[k] = v
-	}
+// copyOccupied returns a copy of an occupied set.
+func copyOccupied(src occupancy) occupancy {
+	dst := make(occupancy, len(src)+4)
+	maps.Copy(dst, src)
 	return dst
 }

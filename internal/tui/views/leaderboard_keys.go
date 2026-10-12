@@ -1,6 +1,6 @@
 package views
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 type leaderboardKeyMap struct {
 	Exit      key.Binding
@@ -73,10 +73,7 @@ func (k *leaderboardKeyMap) FullHelp() [][]key.Binding {
 			k.Up,
 			k.Down,
 		},
-		{
-			k.Search,
-			k.Search,
-		},
+		{k.Search},
 		{k.SortScore, k.SortLevel, k.SortName},
 		{k.SortMode, k.SortDate},
 	}

@@ -1,3 +1,4 @@
+// Package multi implements the authoritative state for SSH multiplayer games.
 package multi
 
 import "github.com/HilthonTT/gosnake/pkg/snake"
@@ -11,14 +12,16 @@ var BodyCells = [MaxPlayers]byte{'S', 'B', 'Y'}
 
 // PlayerSnake is one player's snake state.
 type PlayerSnake struct {
-	Index     int
-	Name      string
-	Points    []snake.Point
-	Direction snake.Direction
-	nextDir   snake.Direction
-	Alive     bool
-	Score     int
+	Index    int
+	Name     string
+	Points   []snake.Point
+	Alive    bool
+	Score    int
+	steering snake.Steering
 }
+
+// Direction returns the direction the snake moved on the last tick.
+func (p *PlayerSnake) Direction() snake.Direction { return p.steering.Current() }
 
 // Game is the authoritative multiplayer game state.
 // It is driven entirely by the server's tick goroutine; no Bubble Tea dependency.
@@ -32,7 +35,7 @@ type Game struct {
 }
 
 // NewGame initialises a fresh game for the given player names.
-// len(names) must be between 2 and MaxPlayers.
+// At most MaxPlayers names are used.
 func NewGame(names []string) *Game {
 	n := min(len(names), MaxPlayers)
 
@@ -47,18 +50,13 @@ func NewGame(names []string) *Game {
 	players := make([]*PlayerSnake, n)
 	var allPts []snake.Point
 
-	for i := 0; i < n; i++ {
-		name := "Player"
-		if i < len(names) {
-			name = names[i]
-		}
+	for i := range n {
 		players[i] = &PlayerSnake{
-			Index:     i,
-			Name:      name,
-			Points:    []snake.Point{starts[i]},
-			Direction: startDirs[i],
-			nextDir:   startDirs[i],
-			Alive:     true,
+			Index:    i,
+			Name:     names[i],
+			Points:   []snake.Point{starts[i]},
+			Alive:    true,
+			steering: snake.NewSteering(startDirs[i]),
 		}
 		allPts = append(allPts, starts[i])
 	}
@@ -66,16 +64,16 @@ func NewGame(names []string) *Game {
 	// One food item per player, placed away from all snakes.
 	foods := make([]*snake.Point, n)
 	for i := range foods {
-		f := snake.NewFood(allPts)
-		foods[i] = f
-		allPts = append(allPts, *f)
+		foods[i] = snake.NewFood(allPts)
+		if foods[i] != nil {
+			allPts = append(allPts, *foods[i])
+		}
 	}
 
 	g := &Game{
 		matrix:  snake.NewMatrix(snake.DefaultRows, snake.DefaultCols),
 		players: players,
 		food:    foods,
-		over:    false,
 		winner:  -1,
 	}
 	g.render()
@@ -84,135 +82,99 @@ func NewGame(names []string) *Game {
 }
 
 // ChangeDirection queues a direction change for a player, rejecting 180° reversals.
-// Safe to call from any goroutine that owns the room lock.
+// Must only be called from the goroutine that owns the game.
 func (g *Game) ChangeDirection(playerIndex int, d snake.Direction) {
 	if playerIndex < 0 || playerIndex >= len(g.players) {
 		return
 	}
-	p := g.players[playerIndex]
-	if !p.Alive {
-		return
+	if p := g.players[playerIndex]; p.Alive {
+		p.steering.Queue(d)
 	}
-	cur := p.Direction
-	if (d == snake.Up && cur == snake.Down) || (d == snake.Down && cur == snake.Up) ||
-		(d == snake.Left && cur == snake.Right) || (d == snake.Right && cur == snake.Left) {
-		return
-	}
-	p.nextDir = d
 }
 
-// Tick advances every alive snake by one step and resolves all collisions.
-// It returns the indices of players that died this tick.
+// Tick advances every alive snake by one step and resolves all collisions
+// simultaneously. It returns the indices of players that died this tick.
 func (g *Game) Tick() []int {
 	if g.over {
 		return nil
 	}
 
 	type move struct {
-		p    *PlayerSnake
-		next snake.Point
+		p     *PlayerSnake
+		next  snake.Point
+		body  []snake.Point // body after the move
+		food  int           // index of the food eaten, or -1
+		alive bool
 	}
 
-	// Compute intended next positions.
-	pending := make([]move, 0, len(g.players))
+	// 1. Compute every intended move and the resulting body.
+	moves := make([]*move, 0, len(g.players))
 	for _, p := range g.players {
 		if !p.Alive {
 			continue
 		}
-
-		p.Direction = p.nextDir
-		h := p.Points[0]
-		n := h
-
-		switch p.Direction {
-		case snake.Up:
-			n.Y--
-		case snake.Down:
-			n.Y++
-		case snake.Left:
-			n.X--
-		case snake.Right:
-			n.X++
-		}
-		pending = append(pending, move{p, n})
+		next := p.Points[0].Step(p.steering.Advance())
+		eaten := g.foodAt(next)
+		moves = append(moves, &move{
+			p:     p,
+			next:  next,
+			body:  snake.Advance(p.Points, next, eaten >= 0),
+			food:  eaten,
+			alive: g.matrix.InBounds(next),
+		})
 	}
 
-	// 1. Wall collisions.
-	for i := range pending {
-		if !g.matrix.InBounds(pending[i].next) {
-			pending[i].p.Alive = false
-		}
-	}
-
-	// 2. Head-to-head collisions (both snakes die).
-	for i := 0; i < len(pending); i++ {
-		for j := i + 1; j < len(pending); j++ {
-			if !pending[i].p.Alive || !pending[j].p.Alive {
-				continue
-			}
-
-			if pending[i].next == pending[j].next {
-				pending[i].p.Alive = false
-				pending[j].p.Alive = false
+	// 2. Head-to-head collisions (same target cell, or swapping cells) kill both.
+	for i, a := range moves {
+		for _, b := range moves[i+1:] {
+			swapped := a.next == b.p.Points[0] && b.next == a.p.Points[0]
+			if a.next == b.next || swapped {
+				a.alive, b.alive = false, false
 			}
 		}
 	}
 
-	// 3. Head-to-body collisions (mover dies; body owner survives).
-	for _, mv := range pending {
-		if !mv.p.Alive {
+	// 3. Head-to-body collisions against the post-move board. Dead snakes are
+	//    removed from the board, so only moving snakes are obstacles.
+	for _, mv := range moves {
+		if !mv.alive {
 			continue
 		}
-	outer:
-		for _, other := range g.players {
-			for si, seg := range other.Points {
-				// The mover's own head is where we're coming from; skip it.
-				if other == mv.p && si == 0 {
-					continue
-				}
-				if seg == mv.next {
-					mv.p.Alive = false
-					break outer
-				}
+		for _, other := range moves {
+			body := other.body
+			if other == mv {
+				body = body[1:] // skip our own new head
 			}
-		}
-	}
-
-	// Collect deaths before moving so callers can notify clients.
-	var died []int
-	for _, mv := range pending {
-		if !mv.p.Alive {
-			died = append(died, mv.p.Index)
-		}
-	}
-
-	// Move surviving snakes and handle food consumption.
-	for _, mv := range pending {
-		if !mv.p.Alive {
-			continue
-		}
-
-		ateIdx := -1
-		for fi, f := range g.food {
-			if f != nil && mv.next.X == f.X && mv.next.Y == f.Y {
-				ateIdx = fi
+			if snake.HitsBody(body, mv.next, false) {
+				mv.alive = false
 				break
 			}
 		}
+	}
 
-		mv.p.Points = append([]snake.Point{mv.next}, mv.p.Points...)
-		if ateIdx >= 0 {
-			mv.p.Score += 10
+	// 4. Apply results.
+	var died []int
+	for _, mv := range moves {
+		if !mv.alive {
+			mv.p.Alive = false
+			died = append(died, mv.p.Index)
+			continue
+		}
+		mv.p.Points = mv.body
+		if mv.food >= 0 {
+			mv.p.Score += snake.PointsPerFood
 			g.foodCount++
-			g.food[ateIdx] = snake.NewFood(g.allSnakePts())
-		} else {
-			mv.p.Points = mv.p.Points[:len(mv.p.Points)-1]
+			g.food[mv.food] = nil
+		}
+	}
+	for i, f := range g.food {
+		if f == nil {
+			g.food[i] = snake.NewFood(g.occupied())
 		}
 	}
 
-	// Check win condition: game ends when ≤1 snake is alive.
-	alive := 0
-	lastAlive := -1
+	// Game ends when ≤1 snake is alive.
+	alive, lastAlive := 0, -1
 	for _, p := range g.players {
 		if p.Alive {
 			alive++
@@ -228,42 +190,59 @@ func (g *Game) Tick() []int {
 	return died
 }
 
-// allSnakePts returns every occupied cell across all snakes (for food placement).
-func (g *Game) allSnakePts() []snake.Point {
+// foodAt returns the index of the food item at p, or -1.
+func (g *Game) foodAt(p snake.Point) int {
+	for i, f := range g.food {
+		if f != nil && *f == p {
+			return i
+		}
+	}
+	return -1
+}
+
+// occupied returns every cell food must avoid: live snakes and other food.
+func (g *Game) occupied() []snake.Point {
 	var pts []snake.Point
 	for _, p := range g.players {
-		pts = append(pts, p.Points...)
+		if p.Alive {
+			pts = append(pts, p.Points...)
+		}
+	}
+	for _, f := range g.food {
+		if f != nil {
+			pts = append(pts, *f)
+		}
 	}
 	return pts
 }
 
 // render clears the matrix and redraws all alive snakes and food items.
 func (g *Game) render() {
-	for y := range g.matrix {
-		for x := range g.matrix[y] {
-			g.matrix[y][x] = 0
-		}
-	}
+	g.matrix.Clear()
 
 	for _, f := range g.food {
 		if f != nil {
-			g.matrix.Set(*f, 'F')
+			g.matrix.Set(*f, snake.CellFood)
 		}
 	}
 
 	for _, p := range g.players {
-		if !p.Alive {
-			continue
-		}
-		for i, pt := range p.Points {
-			if i == 0 {
-				g.matrix.Set(pt, HeadCells[p.Index])
-			} else {
-				g.matrix.Set(pt, BodyCells[p.Index])
-			}
+		if p.Alive {
+			g.matrix.DrawSnake(p.Points, HeadCells[p.Index], BodyCells[p.Index])
 		}
 	}
 }
+
+// Level rises by one every five pieces of food eaten, capped at snake.MaxLevel.
+func (g *Game) Level() int {
+	return min(1+g.foodCount/5, snake.MaxLevel)
+}
+
+func (g *Game) IsOver() bool            { return g.over }
+func (g *Game) Winner() int             { return g.winner }
+func (g *Game) Matrix() snake.Matrix    { return g.matrix }
+func (g *Game) Players() []*PlayerSnake { return g.players }
+func (g *Game) FoodCount() int          { return g.foodCount }
 
 func (g *Game) Snapshot() map[string]any {
 	playerSnaps := make([]map[string]any, len(g.players))
@@ -272,7 +251,7 @@ func (g *Game) Snapshot() map[string]any {
 			"index":     p.Index,
 			"name":      p.Name,
 			"score":     p.Score,
-			"direction": p.Direction,
+			"direction": p.Direction().String(),
 			"alive":     p.Alive,
 			"length":    len(p.Points),
 		}

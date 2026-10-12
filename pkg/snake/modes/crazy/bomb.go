@@ -1,19 +1,18 @@
 package crazy
 
 import (
-	"math/rand"
 	"time"
 
 	"github.com/HilthonTT/gosnake/pkg/snake"
 )
 
-// BombState describes which phase of the bomb lifecycle we're in
+// BombState describes which phase of the bomb lifecycle we're in.
 type BombState int
 
 const (
 	// BombStateWarning: the bomb is blinking at its next position as a visual
 	// cue before it becomes lethal. The snake can pass through safely.
-	BombStateWarning = iota
+	BombStateWarning BombState = iota
 
 	// BombStateActive: the bomb is live. Touching it kills the snake.
 	BombStateActive
@@ -37,33 +36,39 @@ type Bomb struct {
 	ChangesAt time.Time // wall-clock deadline for the next state transition
 }
 
-// newBomb creates a bomb in the warning phase at a random unoccupied position.
-// occupied should contain all points that must not overlap (snake, food, other
-// bombs currently active)
-func newBomb(occupied []snake.Point) *Bomb {
-	p := randomFreePoint(occupied)
+// newBomb creates a bomb in the warning phase at a random cell not in
+// occupied. ok is false when the board is full.
+func newBomb(occupied []snake.Point, now time.Time) (*Bomb, bool) {
+	p, ok := snake.RandomFreePoint(occupied)
+	if !ok {
+		return nil, false
+	}
 	return &Bomb{
 		Point:     p,
 		State:     BombStateWarning,
-		ChangesAt: time.Now().Add(BombWarningDuration),
-	}
+		ChangesAt: now.Add(BombWarningDuration),
+	}, true
 }
 
-func (b *Bomb) update(occupied []snake.Point) {
-	if time.Now().Before(b.ChangesAt) {
+// update advances the bomb's state machine. occupied is only evaluated when
+// the bomb needs to relocate.
+func (b *Bomb) update(now time.Time, occupied func() []snake.Point) {
+	if now.Before(b.ChangesAt) {
 		return
 	}
 
 	switch b.State {
 	case BombStateWarning:
 		b.State = BombStateActive
-		b.ChangesAt = time.Now().Add(BombActiveDuration)
+		b.ChangesAt = now.Add(BombActiveDuration)
 
 	case BombStateActive:
 		// Active period is over — pick a new spot and start warning again.
-		b.Point = randomFreePoint(occupied)
+		if p, ok := snake.RandomFreePoint(occupied()); ok {
+			b.Point = p
+		}
 		b.State = BombStateWarning
-		b.ChangesAt = time.Now().Add(BombWarningDuration)
+		b.ChangesAt = now.Add(BombWarningDuration)
 	}
 }
 
@@ -77,38 +82,8 @@ func (b *Bomb) IsWarning() bool {
 	return b.State == BombStateWarning
 }
 
-// ShouldRenderWarning returns true on the "on" half of the blink cycle so
-// that the caller can alternately show/hide the cell to produce a flash effect.
-// This is purely cosmetic — it doesn't affect game logic.
-func (b *Bomb) ShouldRenderWarning() bool {
-	return (time.Now().UnixMilli()/BombBlinkPeriodMs)%2 == 0
-}
-
-// bombCountForLevel returns how many bombs should be active at a given level.
+// bombCountForLevel returns how many bombs should be present at a given level.
 // Starts at 3 for level 1 and grows by 1 per level.
 func bombCountForLevel(level int) int {
-	return level + 2 // level 1 -> 3, level 2 -> 4, …
-}
-
-// randomFreePoint picks a random board cell that does not appear in occupied.
-func randomFreePoint(occupied []snake.Point) snake.Point {
-	for {
-		p := snake.Point{
-			X: rand.Intn(snake.DefaultCols),
-			Y: rand.Intn(snake.DefaultRows),
-		}
-		if !pointIn(occupied, p) {
-			return p
-		}
-	}
-}
-
-// pointIn is a small linear search helper.
-func pointIn(pts []snake.Point, p snake.Point) bool {
-	for _, q := range pts {
-		if q == p {
-			return true
-		}
-	}
-	return false
+	return level + 2
 }

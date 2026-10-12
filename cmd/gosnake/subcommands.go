@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
+	"github.com/HilthonTT/gosnake/internal/server"
+	"github.com/HilthonTT/gosnake/internal/services/leaderboard"
 	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/starter"
-	"github.com/HilthonTT/gosnake/server"
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/HilthonTT/gosnake/internal/tui/views"
 )
 
 type MenuCmd struct{}
@@ -26,8 +29,8 @@ func (c *MenuCmd) Run(globals *GlobalVars) error {
 }
 
 type PlayCmd struct {
-	GameMode string `arg:"" help:"Game mode to play" default:"normal"`
-	Level    int    `help:"Level to start at" short:"l" default:"1"`
+	GameMode string `arg:"" help:"Game mode to play (normal, crazy, ai)" default:"normal" enum:"normal,crazy,ai"`
+	Level    int    `help:"Level to start at (1-10)" short:"l" default:"1"`
 	Name     string `help:"Name of the player" short:"n" default:"Anonymous"`
 }
 
@@ -52,58 +55,44 @@ func (c *LeaderboardCmd) Run(globals *GlobalVars) error {
 	return launchStarter(globals, tui.ModeLeaderboard, tui.NewLeaderboardInput())
 }
 
-func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.SwitchModeInput) (retErr error) {
-
-	db, err := data.NewDB(globals.DB)
-	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
-	}
-
+func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.SwitchModeInput) error {
 	cfg, err := config.GetConfig(globals.Config)
 	if err != nil {
 		return fmt.Errorf("getting config: %w", err)
 	}
 
+	db, err := data.NewDB(globals.DB)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer db.Close()
+
+	submitter, err := newScoreSubmitter(cfg.Leaderboard)
+	if err != nil {
+		return err
+	}
+
 	model, err := starter.NewModel(
-		starter.NewInput(starterMode, db, cfg, switchIn),
+		starter.NewInput(starterMode, data.NewLeaderboardRepository(db), cfg, switchIn, submitter),
 	)
 	if err != nil {
 		return fmt.Errorf("creating starter model: %w", err)
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			w, h := model.TermSize()
+	exitModel, err := tea.NewProgram(model).Run()
 
-			report := telemetry.NewCrashReport(
-				r,
-				debug.Stack(),
-				model.Recorder(),
-				w, h,
-				model.CurrentMode().String(),
-				model.GameSnapshot(),
-			)
-
-			path, writeErr := telemetry.WriteCrashReport(report)
-			if writeErr != nil {
-				fmt.Fprintf(os.Stderr, "gosnake crashed: %v\n", r)
-				fmt.Fprintf(os.Stderr, "failed to write crash report: %v\n", writeErr)
-			} else {
-				fmt.Fprintf(os.Stderr, "gosnake crashed — report saved to %s\n", path)
-			}
-
-			retErr = fmt.Errorf("panic: %v", r)
-		}
-	}()
-
-	exitModel, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+	// The starter recovers panics from views itself so it can attach the game
+	// state; report them once the terminal has been restored.
+	if crash := model.Crash(); crash != nil {
+		return reportCrash(model, crash)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to run program: %w", err)
 	}
 
 	typedExitModel, ok := exitModel.(*starter.Model)
 	if !ok {
-		return fmt.Errorf("faield to assert exit model type: %w", err)
+		return fmt.Errorf("unexpected exit model type %T", exitModel)
 	}
 
 	if err = typedExitModel.ExitError; err != nil {
@@ -111,6 +100,47 @@ func launchStarter(globals *GlobalVars, starterMode tui.Mode, switchIn tui.Switc
 	}
 
 	return nil
+}
+
+// newScoreSubmitter returns the online leaderboard client, or nil when no API
+// URL is configured.
+func newScoreSubmitter(cfg config.Leaderboard) (views.ScoreSubmitter, error) {
+	if cfg.APIURL == "" {
+		return nil, nil
+	}
+
+	svc, err := leaderboard.NewLeaderboardService(leaderboard.Options{
+		BaseURL:            cfg.APIURL,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configuring online leaderboard: %w", err)
+	}
+	return svc, nil
+}
+
+func reportCrash(model *starter.Model, crash *starter.Crash) error {
+	w, h := model.TermSize()
+	report := telemetry.NewCrashReport(
+		crash.Value,
+		crash.Stack,
+		model.Recorder(),
+		w, h,
+		model.CurrentMode().String(),
+		model.GameSnapshot(),
+	)
+
+	slog.Error("gosnake crashed", "panic", crash.Value)
+
+	path, writeErr := telemetry.WriteCrashReport(report)
+	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "gosnake crashed: %v\n", crash.Value)
+		fmt.Fprintf(os.Stderr, "failed to write crash report: %v\n", writeErr)
+	} else {
+		fmt.Fprintf(os.Stderr, "gosnake crashed — report saved to %s\n", path)
+	}
+
+	return fmt.Errorf("panic: %v", crash.Value)
 }
 
 type ServeCmd struct {
@@ -125,35 +155,36 @@ func (c *ServeCmd) Run(_ *GlobalVars) error {
 		return fmt.Errorf("creating server: %w", err)
 	}
 
-	log.Printf("GoSnake multiplayer server starting on %s:%d", c.Host, c.Port)
-	log.Printf("Players connect with: ssh <name>@<host> -p %d -t <room-id>", c.Port)
+	slog.Info("GoSnake multiplayer server starting", "host", c.Host, "port", c.Port)
+	slog.Info(fmt.Sprintf("Players connect with: ssh <name>@<host> -p %d -t <room-id>", c.Port))
 
 	// Start serving in the background.
 	errCh := make(chan error, 1)
 	go func() {
-		if err := srv.Start(); err != nil {
-			errCh <- err
-		}
+		errCh <- srv.Start()
 	}()
 
 	// Block until SIGINT / SIGTERM or a fatal server error.
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	select {
-	case sig := <-quit:
-		log.Printf("Received %s — shutting down...", sig)
+	case <-ctx.Done():
+		slog.Info("shutting down")
 	case err := <-errCh:
+		if errors.Is(err, server.ErrServerClosed) {
+			return nil
+		}
 		return fmt.Errorf("server error: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
-	log.Println("Server stopped.")
+	slog.Info("server stopped")
 	return nil
 }

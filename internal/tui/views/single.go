@@ -2,12 +2,18 @@ package views
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/stopwatch"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/services/leaderboard"
 	"github.com/HilthonTT/gosnake/internal/telemetry"
@@ -17,37 +23,41 @@ import (
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/ai"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/crazy"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/single"
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/stopwatch"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 const (
-	PausedMessage = `
-    ____                            __  
-   / __ \____ ___  __________  ____/ /  
-  / /_/ / __ ^/ / / / ___/ _ \/ __  /   
- / ____/ /_/ / /_/ (__  )  __/ /_/ /    
-/_/    \__,_/\__,_/____/\___/\__,_/     
-Press PAUSE to continue or HOLD to exit.
-`
+	pausedBanner = `
+    ____                            __
+   / __ \____ ___  __________  ____/ /
+  / /_/ / __ ^/ / / / ___/ _ \/ __  /
+ / ____/ /_/ / /_/ (__  )  __/ /_/ /
+/_/    \__,_/\__,_/____/\___/\__,_/`
 
-	GameOverMessage = `
-   ______                        ____                 
+	gameOverBanner = `
+   ______                        ____
   / ____/___ _____ ___  ___     / __ \_   _____  _____
  / / __/ __ ^/ __ ^__ \/ _ \   / / / / | / / _ \/ ___/
-/ /_/ / /_/ / / / / / /  __/  / /_/ /| |/ /  __/ /    
-\____/\__,_/_/ /_/ /_/\___/   \____/ |___/\___/_/     
-
-            Press EXIT or HOLD to continue.           
-`
+/ /_/ / /_/ / / / / / /  __/  / /_/ /| |/ /  __/ /
+\____/\__,_/_/ /_/ /_/\___/   \____/ |___/\___/_/`
 
 	TimerUpdateInterval = time.Millisecond * 13
 
-	bombBlinkPeriodMs = crazy.BombBlinkPeriodMs
+	scoreSubmitTimeout = 10 * time.Second
 )
+
+// ScoreSubmitter sends finished games to the online leaderboard.
+type ScoreSubmitter interface {
+	SubmitScore(ctx context.Context, req leaderboard.SubmitScoreRequest) (leaderboard.LeaderboardEntry, error)
+}
+
+// SingleDeps are the collaborators a SingleModel needs.
+type SingleDeps struct {
+	// Keys are the configured key bindings; nil uses the defaults.
+	Keys *config.Keys
+
+	// Submitter publishes the final score online; nil disables it.
+	Submitter ScoreSubmitter
+}
 
 var _ tea.Model = &SingleModel{}
 
@@ -57,7 +67,7 @@ type SingleModel struct {
 	mode     tui.Mode
 
 	// tickStopwatch drives the snake's movement; its interval shrinks as the
-	// level rises
+	// level rises.
 	tickStopwatch components.Stopwatch
 
 	// gameStopwatch measures total elapsed play time for the info panel.
@@ -67,53 +77,45 @@ type SingleModel struct {
 	keys   *components.GameKeyMap
 	styles *components.GameStyles
 
-	leaderboardService *leaderboard.LeaderboardService
+	submitter ScoreSubmitter
 
 	width  int
 	height int
 }
 
-func NewSingleModel(in *tui.SingleInput, db *sql.DB) (*SingleModel, error) {
-	repo := data.NewLeaderboardRepository(db)
-
-	var (
-		g   snake.GameController
-		err error
-	)
-
-	switch in.Mode {
+// newGame creates the engine for the given mode.
+func newGame(mode tui.Mode, level int) (snake.GameController, error) {
+	switch mode {
 	case tui.ModeNormal:
-		g, err = single.NewGame(repo)
-		if err != nil {
-			return nil, fmt.Errorf("creating normal snake game: %w", err)
-		}
+		return single.NewGame(level)
 	case tui.ModeCrazy:
-		g, err = crazy.NewGame(repo)
-		if err != nil {
-			return nil, fmt.Errorf("creating crazy snake game: %w", err)
-		}
+		return crazy.NewGame(level)
 	case tui.ModeAI:
-		g, err = ai.NewGame(repo)
-		if err != nil {
-			return nil, fmt.Errorf("creating AI snake game: %w", err)
-		}
+		return ai.NewGame(level)
 	default:
-		return nil, fmt.Errorf("unsupported game mode: %v", in.Mode)
+		return nil, fmt.Errorf("unsupported game mode: %v", mode)
+	}
+}
+
+func NewSingleModel(in *tui.SingleInput, deps SingleDeps) (*SingleModel, error) {
+	level := max(in.Level, 1)
+
+	g, err := newGame(in.Mode, level)
+	if err != nil {
+		return nil, fmt.Errorf("creating %s game: %w", in.Mode, err)
 	}
 
-	m := &SingleModel{
-		username:           in.Username,
-		help:               help.New(),
-		game:               g,
-		keys:               components.NewGameKeyMap(),
-		tickStopwatch:      components.NewStopwatchWithInterval(g.GetDefaultTickInterval()),
-		gameStopwatch:      components.NewStopwatchWithInterval(TimerUpdateInterval),
-		styles:             components.CreateGameStyles(),
-		leaderboardService: leaderboard.NewLeaderboardService(),
-		mode:               in.Mode,
-	}
-
-	return m, nil
+	return &SingleModel{
+		username:      in.Username,
+		help:          help.New(),
+		game:          g,
+		keys:          components.NewGameKeyMap(deps.Keys),
+		tickStopwatch: components.NewStopwatchWithInterval(g.GetTickInterval()),
+		gameStopwatch: components.NewStopwatchWithInterval(TimerUpdateInterval),
+		styles:        components.CreateGameStyles(),
+		submitter:     deps.Submitter,
+		mode:          in.Mode,
+	}, nil
 }
 
 func (m *SingleModel) Init() tea.Cmd {
@@ -131,7 +133,7 @@ func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keys.ForceQuit):
 			return m, tea.Quit
@@ -146,11 +148,12 @@ func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Route to the correct state handler.
-	if m.game.IsGameOver() {
+	switch {
+	case m.game.IsGameOver():
 		m, cmd = m.gameOverUpdate(msg)
-	} else if m.game.IsPaused() {
+	case m.game.IsPaused():
 		m, cmd = m.pausedUpdate(msg)
-	} else {
+	default:
 		m, cmd = m.playingUpdate(msg)
 	}
 	cmds = append(cmds, cmd)
@@ -158,13 +161,16 @@ func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *SingleModel) View() string {
+func (m *SingleModel) View() tea.View {
 	var board string
 	switch {
 	case m.game.IsGameOver():
-		board = m.overlayView(m.styles.Overlay.GameOver, GameOverMessage)
+		hint := fmt.Sprintf("Press %s to see the leaderboard.", strings.ToUpper(m.keys.Quit.Help().Key))
+		board = m.overlayView(m.styles.Overlay.GameOver, gameOverBanner, m.resultLine(), hint)
 	case m.game.IsPaused():
-		board = m.overlayView(m.styles.Overlay.Paused, PausedMessage)
+		hint := fmt.Sprintf("Press %s to resume or %s to quit.",
+			strings.ToUpper(m.keys.Pause.Help().Key), strings.ToUpper(m.keys.Quit.Help().Key))
+		board = m.overlayView(m.styles.Overlay.Paused, pausedBanner, hint)
 	default:
 		board = m.matrixView()
 	}
@@ -178,41 +184,32 @@ func (m *SingleModel) View() string {
 		m.styles.Help.Render(m.help.View(m.keys)),
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content))
 }
 
 // dependenciesUpdate keeps both stopwatches ticking regardless of game state.
 func (m *SingleModel) dependenciesUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
-	var cmds []tea.Cmd
+	var tickCmd, gameCmd tea.Cmd
+	m.tickStopwatch, tickCmd = m.tickStopwatch.Update(msg)
+	m.gameStopwatch, gameCmd = m.gameStopwatch.Update(msg)
 
-	tickModel, cmd := m.tickStopwatch.Update(msg)
-	m.tickStopwatch = tickModel.(components.Stopwatch)
-	cmds = append(cmds, cmd)
-
-	gameModel, cmd := m.gameStopwatch.Update(msg)
-	m.gameStopwatch = gameModel.(components.Stopwatch)
-	cmds = append(cmds, cmd)
-
-	return m, tea.Batch(cmds...)
+	return m, tea.Batch(tickCmd, gameCmd)
 }
 
 func (m *SingleModel) gameOverUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok {
-		if key.Matches(msg, m.keys.Quit) {
-
-			newEntry := &data.LeaderboardEntry{
-				Name:      m.username,
-				Score:     m.game.Score(),
-				Level:     m.game.Level(),
-				CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
-				Mode:      gameModeFromTUI(m.mode),
-			}
-
-			return m, tui.SwitchModeCmd(
-				tui.ModeLeaderboard,
-				tui.NewLeaderboardInput(tui.WithNewEntry(newEntry)),
-			)
+	if msg, ok := msg.(tea.KeyPressMsg); ok && key.Matches(msg, m.keys.Quit) {
+		newEntry := &data.LeaderboardEntry{
+			Name:      m.username,
+			Score:     m.game.Score(),
+			Level:     m.game.Level(),
+			CreatedAt: time.Now().Format(time.DateTime),
+			Mode:      gameModeFromTUI(m.mode),
 		}
+
+		return m, tui.SwitchModeCmd(
+			tui.ModeLeaderboard,
+			tui.NewLeaderboardInput(tui.WithNewEntry(newEntry)),
+		)
 	}
 	return m, nil
 }
@@ -225,7 +222,7 @@ func (m *SingleModel) togglePause() tea.Cmd {
 	)
 }
 
-func (m *SingleModel) playingKeyUpdate(msg tea.KeyMsg) (*SingleModel, tea.Cmd) {
+func (m *SingleModel) playingKeyUpdate(msg tea.KeyPressMsg) (*SingleModel, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
 		m.game.ChangeDirection(snake.Up)
@@ -244,7 +241,7 @@ func (m *SingleModel) playingKeyUpdate(msg tea.KeyMsg) (*SingleModel, tea.Cmd) {
 }
 
 func (m *SingleModel) pausedUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok {
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch {
 		case key.Matches(msg, m.keys.Pause):
 			return m, m.togglePause()
@@ -257,7 +254,7 @@ func (m *SingleModel) pausedUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 
 func (m *SingleModel) playingUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.playingKeyUpdate(msg)
 
 	case stopwatch.TickMsg:
@@ -299,41 +296,60 @@ func (m *SingleModel) matrixView() string {
 	return m.styles.Board.Render(sb.String())
 }
 
-func (m *SingleModel) overlayView(style lipgloss.Style, msg string) string {
+func (m *SingleModel) overlayView(style lipgloss.Style, banner string, lines ...string) string {
 	const (
 		innerW = snake.DefaultCols * 2 // two chars per cell
 		innerH = snake.DefaultRows
 	)
+
+	text := lipgloss.JoinVertical(lipgloss.Center, append([]string{banner, ""}, lines...)...)
 	inner := lipgloss.Place(innerW, innerH,
 		lipgloss.Center, lipgloss.Center,
-		style.Render(msg),
+		style.Render(text),
 	)
 	return m.styles.Board.Render(inner)
+}
+
+// resultLine describes how a versus game ended; empty for solo modes.
+func (m *SingleModel) resultLine() string {
+	vs, ok := m.game.(snake.AIGameController)
+	if !ok {
+		return ""
+	}
+	switch vs.Outcome() {
+	case snake.OutcomeWin:
+		return "You outlasted the AI — you win!"
+	case snake.OutcomeLoss:
+		return "The AI got you — you lose."
+	case snake.OutcomeDraw:
+		return "Head-on collision — it's a draw."
+	default:
+		return ""
+	}
 }
 
 func (m *SingleModel) renderCell(cell byte) string {
 	chars := m.styles.CellChars
 	switch cell {
-	case 'H':
+	case snake.CellHead:
 		return m.styles.HeadCell.Render(chars.Head)
-	case 'S':
+	case snake.CellBody:
 		return m.styles.BodyCell.Render(chars.Body)
-	case 'F':
+	case snake.CellFood:
 		return m.styles.FoodCell.Render(chars.Food)
-	case 'B':
+	case snake.CellBomb:
 		// Active bomb — always shown with a distinctive style.
 		return m.styles.BombCell.Render(chars.Bomb)
-
-	case 'W':
+	case snake.CellBombWarning:
 		// Warning bomb — blinks by alternating between the warning glyph and
 		// an empty cell based on wall-clock milliseconds.
-		if (time.Now().UnixMilli()/bombBlinkPeriodMs)%2 == 0 {
+		if (time.Now().UnixMilli()/crazy.BombBlinkPeriodMs)%2 == 0 {
 			return m.styles.BombWarningCell.Render(chars.BombWarning)
 		}
 		return m.styles.EmptyCell.Render(chars.Empty)
-	case 'A':
+	case snake.CellAIHead:
 		return m.styles.AIHeadCell.Render(chars.AIHead)
-	case 'Z':
+	case snake.CellAIBody:
 		return m.styles.AIBodyCell.Render(chars.AIBody)
 	default:
 		return m.styles.EmptyCell.Render(chars.Empty)
@@ -344,90 +360,86 @@ func (m *SingleModel) infoView() string {
 	s := m.styles.Info
 	divider := s.Divider.Render(strings.Repeat("─", 12))
 
+	vs, isVersus := m.game.(snake.AIGameController)
+
 	var headerText string
 	switch {
+	case m.game.IsGameOver() && isVersus && vs.Outcome() == snake.OutcomeWin:
+		headerText = "YOU WIN"
 	case m.game.IsGameOver():
 		headerText = "GAME OVER"
 	case m.game.IsPaused():
 		headerText = "PAUSED"
 	case m.mode == tui.ModeCrazy:
 		headerText = "CRAZY MODE"
-	case m.mode == tui.ModeAI:
+	case isVersus:
 		headerText = "VS AI"
 	default:
 		headerText = "SNAKE ON"
 	}
 
-	elapsed := m.gameStopwatch.Elapsed().Seconds()
-	minutes := int(elapsed) / 60
-	seconds := int(elapsed) % 60
-	centis := int(elapsed*100) % 100
-	var timeStr string
-	if minutes > 0 {
-		timeStr = fmt.Sprintf("%02d:%02d", minutes, seconds)
-	} else {
-		timeStr = fmt.Sprintf("%02d.%02d", seconds, centis)
+	section := func(label, value string) []string {
+		return []string{s.SectionLbl.Render(label), s.ValueBig.Render(value)}
 	}
-
-	playerSection := lipgloss.JoinVertical(lipgloss.Left,
-		s.SectionLbl.Render("Score"),
-		s.ValueBig.Render(fmt.Sprintf("%d", m.game.Score())),
-		"\n",
-		divider,
-		"\n",
-		s.SectionLbl.Render("Level"),
-		s.ValueBig.Render(fmt.Sprintf("%d", m.game.Level())),
-		"\n",
-		divider,
-		"\n",
-		s.SectionLbl.Render("Time"),
-		s.ValueBig.Render(timeStr),
-		"\n",
-		divider,
-		"\n",
-		s.SectionLbl.Render("Length"),
-		s.ValueBig.Render(fmt.Sprintf("%d", m.game.SnakeLength())),
-	)
+	join := func(sections ...[]string) string {
+		var parts []string
+		for i, sec := range sections {
+			if i > 0 {
+				parts = append(parts, "\n", divider, "\n")
+			}
+			parts = append(parts, sec...)
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		s.Title.Render(headerText),
 		"\n",
-		playerSection,
+		join(
+			section("Score", fmt.Sprint(m.game.Score())),
+			section("Level", fmt.Sprint(m.game.Level())),
+			section("Time", formatElapsed(m.gameStopwatch.Elapsed())),
+			section("Length", fmt.Sprint(m.game.SnakeLength())),
+		),
 	)
 
-	if ai, ok := m.game.(snake.AIGameController); ok {
+	if isVersus {
 		aiStatus := "ALIVE"
-		if !ai.IsAIAlive() {
+		if !vs.IsAIAlive() {
 			aiStatus = "DEAD"
 		}
 
-		aiSection := lipgloss.JoinVertical(lipgloss.Left,
-			"\n",
-			divider,
-			"\n",
+		body = lipgloss.JoinVertical(lipgloss.Left,
+			body,
+			"\n", divider, "\n",
 			s.AILabel.Render("── AI ──"),
 			"\n",
-			s.SectionLbl.Render("Score"),
-			s.ValueBig.Render(fmt.Sprintf("%d", ai.AIScore())),
-			"\n",
-			divider,
-			"\n",
-			s.SectionLbl.Render("Length"),
-			s.ValueBig.Render(fmt.Sprintf("%d", ai.AISnakeLength())),
-			"\n",
-			divider,
-			"\n",
-			s.SectionLbl.Render("Status"),
-			s.ValueBig.Render(aiStatus),
+			join(
+				section("Score", fmt.Sprint(vs.AIScore())),
+				section("Length", fmt.Sprint(vs.AISnakeLength())),
+				section("Status", aiStatus),
+			),
 		)
-
-		body = lipgloss.JoinVertical(lipgloss.Left, body, aiSection)
 	}
 
 	return s.Panel.Render(body)
 }
 
+// formatElapsed renders "SS.cc" under a minute and "MM:SS" afterwards.
+func formatElapsed(d time.Duration) string {
+	if d >= time.Minute {
+		return fmt.Sprintf("%02d:%02d", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%02d.%02d", int(d.Seconds()), int(d.Milliseconds()/10)%100)
+}
+
+// submitScore publishes the result to the online leaderboard, if configured.
+// It runs in the background so a slow or unreachable server never stalls the UI.
 func (m *SingleModel) submitScore() {
+	if m.submitter == nil {
+		return
+	}
+
 	req := leaderboard.SubmitScoreRequest{
 		PlayerName:  m.username,
 		Score:       m.game.Score(),
@@ -436,9 +448,11 @@ func (m *SingleModel) submitScore() {
 	}
 
 	go func() {
-		_, err := m.leaderboardService.SubmitScore(context.Background(), req)
-		if err != nil {
-			log.Printf("%s", err.Error())
+		ctx, cancel := context.WithTimeout(context.Background(), scoreSubmitTimeout)
+		defer cancel()
+
+		if _, err := m.submitter.SubmitScore(ctx, req); err != nil {
+			slog.Warn("submitting score to online leaderboard", "err", err)
 		}
 	}()
 }

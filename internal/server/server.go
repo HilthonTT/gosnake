@@ -1,20 +1,24 @@
+// Package server hosts multiplayer snake rooms over SSH.
 package server
 
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/charmbracelet/ssh"
-	"github.com/charmbracelet/wish"
-	"github.com/charmbracelet/wish/activeterm"
-	"github.com/charmbracelet/wish/logging"
-	"github.com/charmbracelet/wish/ratelimiter"
-	"github.com/charmbracelet/wish/recover"
+	"charm.land/ssh"
+	"charm.land/wish/v2"
+	"charm.land/wish/v2/activeterm"
+	"charm.land/wish/v2/logging"
+	"charm.land/wish/v2/ratelimiter"
+	"charm.land/wish/v2/recover"
 )
+
+// ErrServerClosed is returned by Start after Shutdown.
+var ErrServerClosed = ssh.ErrServerClosed
 
 // PublicKey wraps ssh.PublicKey and provides a stable string key for maps.
 type PublicKey struct {
@@ -24,7 +28,7 @@ type PublicKey struct {
 // String returns the authorized-keys representation of the public key,
 // which is unique and stable across sessions.
 func (pk PublicKey) String() string {
-	return fmt.Sprintf("%s", gossh.MarshalAuthorizedKey(pk.key))
+	return string(gossh.MarshalAuthorizedKey(pk.key))
 }
 
 // Server manages multiplayer snake rooms over SSH.
@@ -54,6 +58,8 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 		ssh.PublicKeyAuth(func(_ ssh.Context, _ ssh.PublicKey) bool { return true }),
 		wish.WithHostKeyPath(keyPath),
 		wish.WithAddress(fmt.Sprintf("%s:%d", host, port)),
+		// Middlewares run last-to-first: rate limits, then recover/logging,
+		// then the PTY check, then the game itself.
 		wish.WithMiddleware(
 			multiMiddleware(s),
 			activeterm.Middleware(),
@@ -63,7 +69,6 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 			ratelimiter.Middleware(globalRL),
 		),
 	)
-
 	if err != nil {
 		return nil, err
 	}
@@ -74,44 +79,46 @@ func NewServer(keyPath, host string, port int) (*Server, error) {
 
 // Start begins serving SSH connections. It blocks until the server stops.
 func (s *Server) Start() error {
-	log.Printf("SSH server listening on %s:%d", s.host, s.port)
+	slog.Info("SSH server listening", "host", s.host, "port", s.port)
 	return s.srv.ListenAndServe()
 }
 
 // Shutdown gracefully closes all rooms and the underlying SSH server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
+	rooms := make([]*Room, 0, len(s.rooms))
 	for _, room := range s.rooms {
-		room.Close()
+		rooms = append(rooms, room)
 	}
 	s.mu.Unlock()
+
+	// Close outside the lock: Room.Close calls back into removeRoom.
+	for _, room := range rooms {
+		room.Close()
+	}
 	return s.srv.Shutdown(ctx)
 }
 
-// FindRoom returns the room with the given id, or nil if it doesn't exist.
-func (s *Server) FindRoom(id string) *Room {
+// FindOrCreateRoom returns the room with the given id, creating it with
+// password if it doesn't exist. created reports whether a new room was made.
+func (s *Server) FindOrCreateRoom(id, password string) (room *Room, created bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rooms[id]
+
+	if room, ok := s.rooms[id]; ok {
+		return room, false
+	}
+
+	room = newRoom(id, password, s.removeRoom)
+	s.rooms[id] = room
+	return room, true
 }
 
-// NewRoom creates, registers, and returns a new room.
-// A goroutine watches the finish channel so the room self-removes on close
-func (s *Server) NewRoom(id, password string) *Room {
-	finish := make(chan string, 1)
-	go func() {
-		rid := <-finish
-		log.Printf("deleting room %s", rid)
-		s.mu.Lock()
-		delete(s.rooms, rid)
-		s.mu.Unlock()
-		close(finish)
-	}()
-
-	room := newRoom(id, password, finish)
+// removeRoom unregisters a closed room.
+func (s *Server) removeRoom(id string) {
 	s.mu.Lock()
-	s.rooms[id] = room
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
-	return room
+	slog.Info("deleting room", "room", id)
+	delete(s.rooms, id)
 }

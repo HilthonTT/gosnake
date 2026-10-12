@@ -1,18 +1,20 @@
 package views
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/tui"
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type sortColumn int
@@ -53,8 +55,10 @@ func NewLeaderboardModel(in *tui.LeaderboardInput) *LeaderboardModel {
 	si.Placeholder = "search by name..."
 	si.CharLimit = 100
 	si.Prompt = "/ "
-	si.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF41"))
-	si.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+	styles := textinput.DefaultStyles(true)
+	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF41"))
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+	si.SetStyles(styles)
 	si.ShowSuggestions = true
 	si.SetSuggestions(uniqueNames(in.Entries))
 
@@ -80,7 +84,7 @@ func (m *LeaderboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.search.Focused() {
 			switch {
 			case key.Matches(msg, m.keys.Exit):
@@ -129,7 +133,7 @@ func (m *LeaderboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *LeaderboardModel) View() string {
+func (m *LeaderboardModel) View() tea.View {
 	sortHint := m.sortHint()
 
 	var searchView string
@@ -147,7 +151,7 @@ func (m *LeaderboardModel) View() string {
 		searchView,
 		m.help.View(m.keys),
 	)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content))
 }
 
 func (m *LeaderboardModel) sortHint() string {
@@ -173,20 +177,13 @@ func (m *LeaderboardModel) sortHint() string {
 func buildLeaderboardTable(entries []data.LeaderboardEntry, focusID int, termWidth int) table.Model {
 	nameWidth := 16
 	for _, e := range entries {
-		if len(e.Name) > nameWidth {
-			nameWidth = len(e.Name)
-		}
+		// +2 leaves room for the "▶ " marker on the focused row.
+		nameWidth = max(nameWidth, lipgloss.Width(e.Name)+2)
 	}
 
 	if termWidth > 0 {
 		const otherCols = 10 + 8 + 10 + 14 // score + level + mode + date
-		maxName := termWidth - otherCols
-		if maxName < 0 {
-			maxName = 0
-		}
-		if nameWidth > maxName {
-			nameWidth = maxName
-		}
+		nameWidth = min(nameWidth, max(termWidth-otherCols, 0))
 	}
 
 	cols := []table.Column{
@@ -278,26 +275,27 @@ func (m *LeaderboardModel) filteredSorted() []data.LeaderboardEntry {
 	}
 
 	slices.SortFunc(filtered, func(a, b data.LeaderboardEntry) int {
-		var cmp int
+		var c int
 
 		switch m.sort.col {
 		case sortByScore:
-			cmp = a.Score - b.Score
+			c = cmp.Compare(a.Score, b.Score)
 		case sortByLevel:
-			cmp = a.Level - b.Level
+			c = cmp.Compare(a.Level, b.Level)
 		case sortByName:
-			cmp = strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			c = cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 		case sortByMode:
-			cmp = strings.Compare(string(a.Mode), string(b.Mode))
+			c = cmp.Compare(strings.ToLower(string(a.Mode)), strings.ToLower(string(b.Mode)))
 		case sortByDate:
-			cmp = strings.Compare(a.CreatedAt, b.CreatedAt)
+			c = cmp.Compare(a.CreatedAt, b.CreatedAt)
 		}
 
 		if m.sort.desc {
-			return -cmp
+			c = -c
 		}
 
-		return cmp
+		// Ties fall back to the best score, then the newest entry.
+		return cmp.Or(c, cmp.Compare(b.Score, a.Score), cmp.Compare(b.ID, a.ID))
 	})
 
 	return filtered
@@ -305,7 +303,7 @@ func (m *LeaderboardModel) filteredSorted() []data.LeaderboardEntry {
 
 func uniqueNames(entries []data.LeaderboardEntry) []string {
 	seen := make(map[string]struct{}, len(entries))
-	names := make([]string, len(entries))
+	names := make([]string, 0, len(entries))
 
 	for _, e := range entries {
 		if _, ok := seen[e.Name]; !ok {

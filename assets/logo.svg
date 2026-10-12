@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="t">
+  <title id="t">gosnake</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#151B23"/>
+      <stop offset="1" stop-color="#0D1117"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowRed" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g>
+    <rect x="4" y="4" width="248" height="248" rx="44" fill="url(#bg)"/>
+    <rect x="4.5" y="4.5" width="247" height="247" rx="43.5" fill="none" stroke="#2A3440" stroke-width="1"/>
+    <circle cx="33.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="60.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="87.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="114.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="141.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="168.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="195.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="33.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="60.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="87.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="114.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="141.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="168.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="195.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="87.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="87.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="114.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="141.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="168.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="195.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="114.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="141.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="141.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="60.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="87.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="114.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="141.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="168.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="168.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="195.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="195.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="33.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="60.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="87.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="114.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="141.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="168.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="195.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <circle cx="222.5" cy="222.5" r="1.6" fill="#2F3B47"/>
+    <rect x="49.0" y="184.0" width="23.0" height="23.0" rx="6" fill="#0E7A34"/>
+    <rect x="76.0" y="184.0" width="23.0" height="23.0" rx="6" fill="#0D8135"/>
+    <rect x="103.0" y="184.0" width="23.0" height="23.0" rx="6" fill="#0D8735"/>
+    <rect x="130.0" y="184.0" width="23.0" height="23.0" rx="6" fill="#0C8E36"/>
+    <rect x="157.0" y="184.0" width="23.0" height="23.0" rx="6" fill="#0B9537"/>
+    <rect x="184.0" y="184.0" width="23.0" height="23.0" rx="6" fill="#0A9B37"/>
+    <rect x="184.0" y="157.0" width="23.0" height="23.0" rx="6" fill="#0AA238"/>
+    <rect x="184.0" y="130.0" width="23.0" height="23.0" rx="6" fill="#09A939"/>
+    <rect x="157.0" y="130.0" width="23.0" height="23.0" rx="6" fill="#08AF39"/>
+    <rect x="130.0" y="130.0" width="23.0" height="23.0" rx="6" fill="#08B63A"/>
+    <rect x="103.0" y="130.0" width="23.0" height="23.0" rx="6" fill="#07BC3A"/>
+    <rect x="76.0" y="130.0" width="23.0" height="23.0" rx="6" fill="#06C33B"/>
+    <rect x="49.0" y="130.0" width="23.0" height="23.0" rx="6" fill="#06CA3C"/>
+    <rect x="49.0" y="103.0" width="23.0" height="23.0" rx="6" fill="#05D03C"/>
+    <rect x="49.0" y="76.0" width="23.0" height="23.0" rx="6" fill="#04D73D"/>
+    <rect x="49.0" y="49.0" width="23.0" height="23.0" rx="6" fill="#04DE3E"/>
+    <rect x="76.0" y="49.0" width="23.0" height="23.0" rx="6" fill="#03E43E"/>
+    <rect x="103.0" y="49.0" width="23.0" height="23.0" rx="6" fill="#02EB3F"/>
+    <rect x="130.0" y="49.0" width="23.0" height="23.0" rx="6" fill="#01F240"/>
+    <rect x="157.0" y="49.0" width="23.0" height="23.0" rx="6" fill="#01F840"/>
+    <rect x="182.0" y="47.0" width="27.0" height="27.0" rx="8" fill="#00FF41" filter="url(#glow)"/>
+    <circle cx="199.2" cy="57.3" r="3.4" fill="#0D1117"/>
+    <circle cx="200.1" cy="56.1" r="1.1" fill="#FFFFFF"/>
+    <path d="M208.0 63.3 h4 l2.5 -2.5 M212.0 63.3 l2.5 2.5" stroke="#FF3B3B" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+    <path d="M222.5 51.3 L231.7 60.5 L222.5 69.7 L213.3 60.5 Z" fill="#FF3B3B" filter="url(#glowRed)"/>
+  </g>
+</svg>

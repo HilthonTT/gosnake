@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type MsgRecord struct {
@@ -14,20 +14,20 @@ type MsgRecord struct {
 	Timestamp time.Time `json:"ts"`
 }
 
+// Recorder keeps the most recent Bubble Tea messages in a fixed-size ring
+// buffer so a crash report can show what led up to a panic.
 type Recorder struct {
-	buf  []MsgRecord
-	size int
 	mu   sync.Mutex
+	buf  []MsgRecord
+	next int  // index the next record is written to
+	full bool // true once the buffer has wrapped
 }
 
 func NewRecorder(size int) *Recorder {
-	return &Recorder{buf: make([]MsgRecord, 0, size), size: size}
+	return &Recorder{buf: make([]MsgRecord, max(size, 1))}
 }
 
 func (r *Recorder) Record(msg tea.Msg) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	rec := MsgRecord{
 		Type:      fmt.Sprintf("%T", msg),
 		Timestamp: time.Now(),
@@ -39,20 +39,29 @@ func (r *Recorder) Record(msg tea.Msg) {
 	case tea.WindowSizeMsg:
 		rec.Detail = fmt.Sprintf("%dx%d", m.Width, m.Height)
 	case tea.MouseMsg:
-		rec.Detail = fmt.Sprintf("mouse %d,%d", m.X, m.Y)
+		mouse := m.Mouse()
+		rec.Detail = fmt.Sprintf("mouse %d,%d", mouse.X, mouse.Y)
 	}
 
-	if len(r.buf) >= r.size {
-		r.buf = r.buf[1:]
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.buf[r.next] = rec
+	r.next = (r.next + 1) % len(r.buf)
+	if r.next == 0 {
+		r.full = true
 	}
-	r.buf = append(r.buf, rec)
 }
 
+// Snapshot returns the recorded messages, oldest first.
 func (r *Recorder) Snapshot() []MsgRecord {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	out := make([]MsgRecord, len(r.buf))
-	copy(out, r.buf)
-	return out
+	if !r.full {
+		return append([]MsgRecord(nil), r.buf[:r.next]...)
+	}
+	out := make([]MsgRecord, 0, len(r.buf))
+	out = append(out, r.buf[r.next:]...)
+	return append(out, r.buf[:r.next]...)
 }

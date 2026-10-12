@@ -1,13 +1,16 @@
 package views
 
 import (
-	"github.com/Broderick-Westrope/charmutils"
+	"strconv"
+
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
+
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/validate"
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/HilthonTT/gosnake/pkg/snake"
 )
 
 const TitleStr = `
@@ -76,12 +79,11 @@ func NewMenuModel(_ *tui.MenuInput) *MenuModel {
 					Value(&formData.Level).
 					Title("Starting Level").
 					Description("Higher levels start faster").
-					Options(charmutils.HuhIntRangeOptions(1, 10)...),
+					Options(levelOptions()...),
 			),
 		).
 			WithKeyMap(keys.formKeys).
 			WithTheme(greenTheme()).
-			WithAccessible(true).
 			WithShowHelp(true),
 		keys: keys,
 	}
@@ -96,7 +98,7 @@ func (m *MenuModel) Init() tea.Cmd {
 
 func (m *MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if key.Matches(msg, m.keys.Exit) {
 			return m, tea.Quit
 		}
@@ -125,7 +127,7 @@ func (m *MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *MenuModel) View() string {
+func (m *MenuModel) View() tea.View {
 	title := titleStyle.Render(TitleStr)
 	subtitle := subtitleStyle.Render("eat, grow, survive")
 	hint := hintStyle.Render("ctrl+c / esc to quit")
@@ -140,7 +142,7 @@ func (m *MenuModel) View() string {
 		hint,
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content))
 }
 
 func (m *MenuModel) announceCompletion() tea.Cmd {
@@ -149,9 +151,20 @@ func (m *MenuModel) announceCompletion() tea.Cmd {
 	return tui.SwitchModeCmd(m.formData.GameMode, in)
 }
 
-func greenTheme() *huh.Theme {
-	t := huh.ThemeBase()
-	t.Focused.Title = t.Focused.Title.Foreground(lipgloss.Color("#00FF41"))
-	t.Blurred.Title = t.Blurred.Title.Foreground(lipgloss.Color("#006400"))
-	return t
+func greenTheme() huh.Theme {
+	return huh.ThemeFunc(func(isDark bool) *huh.Styles {
+		t := huh.ThemeBase(isDark)
+		t.Focused.Title = t.Focused.Title.Foreground(lipgloss.Color("#00FF41"))
+		t.Blurred.Title = t.Blurred.Title.Foreground(lipgloss.Color("#006400"))
+		return t
+	})
+}
+
+// levelOptions lists every selectable starting level.
+func levelOptions() []huh.Option[int] {
+	opts := make([]huh.Option[int], 0, snake.MaxLevel)
+	for level := 1; level <= snake.MaxLevel; level++ {
+		opts = append(opts, huh.NewOption(strconv.Itoa(level), level))
+	}
+	return opts
 }

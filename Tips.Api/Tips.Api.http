@@ -1,6 +1,31 @@
-@Tips.Api_HostAddress = http://localhost:5111
+@HostAddress = http://localhost:5000
 
-GET {{Tips.Api_HostAddress}}/weatherforecast/
+### Tips
+GET {{HostAddress}}/api/v1/tips?difficulty=Beginner
 Accept: application/json
 
-###
+### Live tips (SSE)
+GET {{HostAddress}}/api/v1/tips/realtime
+Accept: text/event-stream
+
+### Leaderboard
+GET {{HostAddress}}/api/v1/leaderboard?top=10
+Accept: application/json
+
+### Submit a score
+POST {{HostAddress}}/api/v1/leaderboard
+Content-Type: application/json
+
+{
+  "playerName": "Hilthon",
+  "score": 420,
+  "level": 3,
+  "snakeLength": 43
+}
+
+### Live leaderboard changes (SSE)
+GET {{HostAddress}}/api/v1/leaderboard/realtime
+Accept: text/event-stream
+
+### Health
+GET {{HostAddress}}/health

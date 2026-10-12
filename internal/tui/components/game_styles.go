@@ -1,9 +1,9 @@
 package components
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Palette — xterm-256 colour constants used throughout the game.
-const (
+var (
 	colSnakeHead   = lipgloss.Color("82")  // bright lime green
 	colSnakeBody   = lipgloss.Color("40")  // medium green
 	colAIHead      = lipgloss.Color("39")  // bright cyan        — AI head

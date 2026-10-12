@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      charm:
+        patterns: ["charm.land/*", "github.com/charmbracelet/*"]
+      golang-x:
+        patterns: ["golang.org/x/*"]
+
+  - package-ecosystem: nuget
+    directories: ["/Tips.Api", "/Tips.Api.Tests"]
+    schedule:
+      interval: weekly
+    groups:
+      aspnetcore:
+        patterns: ["Microsoft.AspNetCore.*", "Asp.Versioning.*"]
+      testing:
+        patterns: ["xunit*", "Microsoft.NET.Test.Sdk", "coverlet.*"]
+
+  - package-ecosystem: docker
+    directories: ["/", "/Tips.Api"]
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

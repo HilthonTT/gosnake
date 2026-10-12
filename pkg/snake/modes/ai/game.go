@@ -1,7 +1,9 @@
+// Package ai implements a 1v1 mode against a computer-controlled snake.
 package ai
 
 import (
-	"github.com/HilthonTT/gosnake/internal/data"
+	"time"
+
 	"github.com/HilthonTT/gosnake/pkg/snake"
 )
 
@@ -9,77 +11,89 @@ import (
 var _ snake.AIGameController = (*Game)(nil)
 
 // Game is the 1v1 AI mode. Both the player snake and the AI snake share the
-// same board and compete for the same food pellet. Either snake can kill the
-// other by cutting across its path:
+// same board and compete for the same food pellet. Moves are resolved
+// simultaneously:
 //
-//   - A snake that runs into the OTHER snake's body dies immediately.
+//   - A snake that runs into the OTHER snake's body dies.
 //   - Head-on collision (both snakes step onto the same cell on the same tick)
-//     kills both snakes and ends the game.
+//     kills both snakes — a draw.
 //   - Running into your own body or a wall also kills that snake.
+//
+// The game ends as soon as either snake dies.
 type Game struct {
 	matrix snake.Matrix
 
 	// Player snake
 	playerBody  []snake.Point
-	playerDir   snake.Direction
-	playerNext  snake.Direction
+	playerSteer snake.Steering
 	playerScore *snake.Scoring
 	playerAlive bool
 
 	// AI snake
 	aiBody  []snake.Point
-	aiDir   snake.Direction
+	aiSteer snake.Steering
 	aiScore *snake.Scoring
 	aiAlive bool
 	aiSt    *aiState
+	brain   Brain
 
 	food     *snake.Point
 	paused   bool
 	gameOver bool
-
-	repo *data.LeaderboardRepository
 }
 
-func NewGame(repo *data.LeaderboardRepository) (*Game, error) {
-	matrix := snake.NewMatrix(snake.DefaultRows, snake.DefaultCols)
+// Brain decides the AI snake's next direction. It is only called while the
+// AI is alive and there is food on the board.
+type Brain func(g *Game) snake.Direction
 
-	playerScoring, err := snake.NewScoring(1, 10, 100, true, false)
+// pathfinderBrain is the default Brain: a level-scaled mix of safe BFS,
+// aggressive intercepts and deliberate mistakes (see nextDirection).
+func pathfinderBrain(g *Game) snake.Direction {
+	return nextDirection(
+		g.aiBody[0],
+		*g.food,
+		g.playerBody[0],
+		g.playerSteer.Current(),
+		g.aiSteer.Current(),
+		occupiedSet(g.playerBody, g.aiBody),
+		g.aiBody,
+		g.playerScore.Level(),
+		g.aiSt,
+	)
+}
+
+// NewGame starts a versus game at the given level (1-10). The level controls
+// both the speed and how sharp the AI plays.
+func NewGame(level int) (*Game, error) {
+	playerScoring, err := snake.NewDefaultScoring(level)
 	if err != nil {
 		return nil, err
 	}
 
-	aiScoring, err := snake.NewScoring(1, 10, 100, true, false)
+	aiScoring, err := snake.NewDefaultScoring(level)
 	if err != nil {
 		return nil, err
 	}
 
 	// Spawn the two snakes on opposite sides of the board so they don't
 	// immediately collide.
-	playerStart := []snake.Point{
-		{X: snake.DefaultCols / 4, Y: snake.DefaultRows / 2},
-	}
-	aiStart := []snake.Point{
-		{X: (snake.DefaultCols * 3) / 4, Y: snake.DefaultRows / 2},
-	}
-
-	allOccupied := append(playerStart, aiStart...)
-	food := snake.NewFood(allOccupied)
+	playerStart := []snake.Point{{X: snake.DefaultCols / 4, Y: snake.DefaultRows / 2}}
+	aiStart := []snake.Point{{X: (snake.DefaultCols * 3) / 4, Y: snake.DefaultRows / 2}}
 
 	g := &Game{
-		matrix:      matrix,
+		matrix:      snake.NewMatrix(snake.DefaultRows, snake.DefaultCols),
 		playerBody:  playerStart,
-		playerDir:   snake.Right,
-		playerNext:  snake.Right,
+		playerSteer: snake.NewSteering(snake.Right),
 		playerScore: playerScoring,
 		playerAlive: true,
 		aiBody:      aiStart,
-		aiDir:       snake.Left,
+		aiSteer:     snake.NewSteering(snake.Left),
 		aiScore:     aiScoring,
 		aiAlive:     true,
 		aiSt:        newAIState(),
-		food:        food,
-		repo:        repo,
+		brain:       pathfinderBrain,
 	}
+	g.food = snake.NewFood(g.allBodies())
 
 	g.render()
 	return g, nil
@@ -91,15 +105,7 @@ func (g *Game) ChangeDirection(d snake.Direction) {
 	if g.gameOver || g.paused || !g.playerAlive {
 		return
 	}
-
-	if (d == snake.Up && g.playerDir == snake.Down) ||
-		(d == snake.Down && g.playerDir == snake.Up) ||
-		(d == snake.Left && g.playerDir == snake.Right) ||
-		(d == snake.Right && g.playerDir == snake.Left) {
-		return
-	}
-
-	g.playerNext = d
+	g.playerSteer.Queue(d)
 }
 
 // TogglePause pauses or resumes the game.
@@ -116,152 +122,110 @@ func (g *Game) Tick() {
 		return
 	}
 
-	// AI picks its next direction using the improved pathfinder.
-	if g.aiAlive {
-		occupied := occupiedSet(g.playerBody, g.aiBody)
-		g.aiDir = nextDirection(
-			g.aiBody[0],
-			*g.food,
-			g.playerBody[0],
-			g.playerDir,
-			g.aiDir,
-			occupied,
-			g.aiBody,
-			g.playerScore.Level(),
-			g.aiSt,
-		)
+	// The AI picks its next direction with full knowledge of the board.
+	if g.aiAlive && g.food != nil {
+		g.aiSteer.Set(g.brain(g))
 	}
 
-	// Compute next head positions.
-	var playerNext, aiNext snake.Point
-	if g.playerAlive {
-		g.playerDir = g.playerNext
-		playerNext = step(g.playerBody[0], g.playerDir)
-	}
-	if g.aiAlive {
-		aiNext = step(g.aiBody[0], g.aiDir)
+	playerNext := g.playerBody[0].Step(g.playerSteer.Advance())
+	aiNext := g.aiBody[0].Step(g.aiSteer.Advance())
+
+	// Head-on collision: both snakes step onto the same cell, or swap cells.
+	if playerNext == aiNext || (playerNext == g.aiBody[0] && aiNext == g.playerBody[0]) {
+		g.playerAlive, g.aiAlive, g.gameOver = false, false, true
+		g.render()
+		return
 	}
 
-	// Head-on collision: both snakes step onto the same cell.
-	if g.playerAlive && g.aiAlive && playerNext == aiNext {
-		g.playerAlive = false
-		g.aiAlive = false
+	playerGrows := g.food != nil && playerNext == *g.food
+	aiGrows := g.food != nil && aiNext == *g.food
+
+	newPlayer := snake.Advance(g.playerBody, playerNext, playerGrows)
+	newAI := snake.Advance(g.aiBody, aiNext, aiGrows)
+
+	// Judge both moves against the post-move board so a tail that moves away
+	// this tick is not an obstacle, but one that stays (because it ate) is.
+	g.playerAlive = g.matrix.InBounds(playerNext) &&
+		!snake.HitsBody(newPlayer[1:], playerNext, false) &&
+		!snake.HitsBody(newAI, playerNext, false)
+	g.aiAlive = g.matrix.InBounds(aiNext) &&
+		!snake.HitsBody(newAI[1:], aiNext, false) &&
+		!snake.HitsBody(newPlayer, aiNext, false)
+
+	if !g.playerAlive || !g.aiAlive {
 		g.gameOver = true
 		g.render()
 		return
 	}
 
-	// Move player.
-	if g.playerAlive {
-		if !g.matrix.InBounds(playerNext) || g.isSelfCollision(playerNext, g.playerBody) {
-			g.playerAlive = false
-		} else if g.isBodyCollision(playerNext, g.aiBody) {
-			g.playerAlive = false
-		}
-
-		if g.playerAlive {
-			ateFood := playerNext == *g.food
-			g.playerBody = append([]snake.Point{playerNext}, g.playerBody...)
-			if ateFood {
-				g.playerScore.AddPoints(10)
-				g.food = snake.NewFood(append(g.playerBody, g.aiBody...))
-			} else {
-				g.playerBody = g.playerBody[:len(g.playerBody)-1]
-			}
-		}
+	g.playerBody, g.aiBody = newPlayer, newAI
+	if playerGrows {
+		g.playerScore.AddPoints(snake.PointsPerFood)
 	}
-
-	// Move AI.
-	if g.aiAlive {
-		if !g.matrix.InBounds(aiNext) || g.isSelfCollision(aiNext, g.aiBody) {
-			g.aiAlive = false
-		} else if g.isBodyCollision(aiNext, g.playerBody) {
-			g.aiAlive = false
-		}
-
-		if g.aiAlive {
-			ateFood := aiNext == *g.food
-			g.aiBody = append([]snake.Point{aiNext}, g.aiBody...)
-			if ateFood {
-				g.aiScore.AddPoints(10)
-				g.food = snake.NewFood(append(g.playerBody, g.aiBody...))
-			} else {
-				g.aiBody = g.aiBody[:len(g.aiBody)-1]
-			}
-		}
+	if aiGrows {
+		g.aiScore.AddPoints(snake.PointsPerFood)
 	}
-
-	// Game ends when either snake dies.
-	if !g.playerAlive || !g.aiAlive {
-		g.gameOver = true
+	if playerGrows || aiGrows {
+		g.food = snake.NewFood(g.allBodies())
 	}
 
 	g.render()
 }
 
-func (g *Game) SaveScore(name string) error {
-	_, err := g.repo.Save(name, g.playerScore.Total(), g.playerScore.Level(), data.GameModeNormal)
-	return err
+// Outcome reports who won once the game is over.
+func (g *Game) Outcome() snake.Outcome {
+	switch {
+	case !g.gameOver:
+		return snake.OutcomePending
+	case g.playerAlive && !g.aiAlive:
+		return snake.OutcomeWin
+	case !g.playerAlive && g.aiAlive:
+		return snake.OutcomeLoss
+	default:
+		return snake.OutcomeDraw
+	}
 }
 
-func (g *Game) isSelfCollision(p snake.Point, body []snake.Point) bool {
-	for _, s := range body {
-		if s == p {
-			return true
-		}
-	}
-	return false
-}
-
-func (g *Game) isBodyCollision(p snake.Point, body []snake.Point) bool {
-	limit := len(body) - 1
-	for i := 0; i < limit; i++ {
-		if body[i] == p {
-			return true
-		}
-	}
-	return false
+func (g *Game) allBodies() []snake.Point {
+	return append(append([]snake.Point(nil), g.playerBody...), g.aiBody...)
 }
 
 // render writes the full current game state onto the matrix.
 func (g *Game) render() {
-	for y := range g.matrix {
-		for x := range g.matrix[y] {
-			g.matrix[y][x] = 0
-		}
-	}
+	g.matrix.Clear()
 
 	if g.food != nil {
-		g.matrix.Set(*g.food, 'F')
+		g.matrix.Set(*g.food, snake.CellFood)
 	}
-
-	for i, p := range g.aiBody {
-		if i == 0 {
-			g.matrix.Set(p, 'A')
-		} else {
-			g.matrix.Set(p, 'Z')
-		}
-	}
-
-	for i, p := range g.playerBody {
-		if i == 0 {
-			g.matrix.Set(p, 'H')
-		} else {
-			g.matrix.Set(p, 'S')
-		}
-	}
+	g.matrix.DrawSnake(g.aiBody, snake.CellAIHead, snake.CellAIBody)
+	g.matrix.DrawSnake(g.playerBody, snake.CellHead, snake.CellBody)
 }
+
+func (g *Game) Matrix() snake.Matrix           { return g.matrix }
+func (g *Game) IsGameOver() bool               { return g.gameOver }
+func (g *Game) IsPaused() bool                 { return g.paused }
+func (g *Game) Score() int                     { return g.playerScore.Total() }
+func (g *Game) Level() int                     { return g.playerScore.Level() }
+func (g *Game) Snake() []snake.Point           { return g.playerBody }
+func (g *Game) SnakeLength() int               { return len(g.playerBody) }
+func (g *Game) Food() *snake.Point             { return g.food }
+func (g *Game) GetTickInterval() time.Duration { return snake.GetTickInterval(g.playerScore.Level()) }
+
+func (g *Game) AIScore() int        { return g.aiScore.Total() }
+func (g *Game) AISnakeLength() int  { return len(g.aiBody) }
+func (g *Game) IsAIAlive() bool     { return g.aiAlive }
+func (g *Game) IsPlayerAlive() bool { return g.playerAlive }
 
 // Snapshot returns a map of the current game state for crash reports.
 func (g *Game) Snapshot() map[string]any {
 	snap := map[string]any{
 		"playerScore":    g.playerScore.Total(),
 		"playerLevel":    g.playerScore.Level(),
-		"playerDir":      g.playerDir,
+		"playerDir":      g.playerSteer.Current().String(),
 		"playerLen":      len(g.playerBody),
 		"playerAlive":    g.playerAlive,
 		"aiScore":        g.aiScore.Total(),
-		"aiDir":          g.aiDir,
+		"aiDir":          g.aiSteer.Current().String(),
 		"aiLen":          len(g.aiBody),
 		"aiAlive":        g.aiAlive,
 		"aiTailChaseTks": g.aiSt.tailChaseTicks,

@@ -11,6 +11,7 @@ type SubmitScoreRequest struct {
 
 type LeaderboardEntry struct {
 	EntryID     string    `json:"entryId"`
+	PlayerName  string    `json:"playerName"`
 	Score       int       `json:"score"`
 	Level       int       `json:"level"`
 	SnakeLength int       `json:"snakeLength"`

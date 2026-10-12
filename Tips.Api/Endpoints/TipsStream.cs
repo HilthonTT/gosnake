@@ -1,5 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using System.Net.ServerSentEvents;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
 using Tips.Api.DTOs.Common;
 using Tips.Api.Models;
 using Tips.Api.Realtime;
@@ -9,99 +9,46 @@ namespace Tips.Api.Endpoints;
 
 internal static class TipsStream
 {
-    private static readonly TimeSpan SseRetryInterval = TimeSpan.FromSeconds(5);
-
-    public static void MapTipsEndpoints(this WebApplication _, IEndpointRouteBuilder routes)
+    public static IEndpointRouteBuilder MapTipsEndpoints(this IEndpointRouteBuilder routes)
     {
         RouteGroupBuilder group = routes.MapGroup("tips")
             .WithTags("Tips");
 
-        group.MapGet("/", (
-            ITipRepository repo,
-            [FromQuery] TipDifficulty? difficulty,
-            [FromQuery] TipCategory? category) =>
-        {
-            IReadOnlyList<GameTip> tips = difficulty.HasValue ? repo.GetByDifficulty(difficulty.Value)
-                     : category.HasValue ? repo.GetByCategory(category.Value)
-                     : repo.GetAll();
+        group.MapGet("/", GetTips)
+            .WithName("GetTips");
 
-            var response = new CollectionResponse<GameTip>()
-            {
-                Items = tips.ToList()
-            };
+        group.MapGet("realtime", StreamTips)
+            .WithName("TipsRealtime");
 
-            return Results.Ok(response);
-        })
-        .WithName("GetTips");
-
-        group.MapGet("/realtime", (
-            BroadcastManager broadcastManager,
-            TipEventBuffer eventBuffer,
-            ILoggerFactory loggerFactory,
-            [FromQuery] TipDifficulty? difficulty,
-            [FromQuery] TipCategory? category,
-            [FromHeader(Name = "Last-Event-ID")] string? lastEventId,
-            CancellationToken cancellationToken) =>
-        {
-            ILogger logger = loggerFactory.CreateLogger("SnakeTips.Realtime.Stream");
-            (string? connectionId, System.Threading.Channels.ChannelReader<GameTip>? reader) = 
-                broadcastManager.Subscribe();
-
-            async IAsyncEnumerable<SseItem<GameTip>> StreamTips()
-            {
-                yield return new SseItem<GameTip>(default!)
-                {
-                    ReconnectionInterval  = SseRetryInterval,
-                };
-
-                if (!string.IsNullOrWhiteSpace(lastEventId))
-                {
-                    var missed = eventBuffer.GetEventsAfter(lastEventId);
-
-                    if (logger.IsEnabled(LogLevel.Debug))
-                    {
-                        logger.LogDebug(
-                            "Replaying {Count} missed tips for {ConnectionId}",
-                            missed.Count, connectionId);
-                    }
-
-                    foreach (var item in missed.Where(i => Matches(i.Data, difficulty, category)))
-                    {
-                        yield return item;
-                    }
-                }
-
-                await foreach (GameTip tip in reader.ReadAllAsync(cancellationToken))
-                {
-                    if (!Matches(tip, difficulty, category))
-                    {
-                        continue;
-                    }
-
-                    SseItem<GameTip> sseItem = eventBuffer.Add(tip);
-                    yield return sseItem;
-                }
-            }
-
-            return TypedResults.ServerSentEvents(StreamTips(), eventType: "tip");
-        })
-        .WithName("TipsRealtime");
+        return routes;
     }
 
-    private static bool Matches(GameTip? tip, TipDifficulty? difficulty, TipCategory? category)
+    private static Ok<CollectionResponse<GameTip>> GetTips(
+        ITipRepository repo,
+        [FromQuery] TipDifficulty? difficulty,
+        [FromQuery] TipCategory? category)
     {
-        if (tip is null)
-        {
-            return false;
-        }
-        if (difficulty.HasValue && tip.Difficulty != difficulty.Value)
-        {
-            return false;
-        }
-        if (category.HasValue && tip.Category != category.Value)
-        {
-            return false;
-        }
-        return true;
+        var tips = repo.GetAll().Where(tip => Matches(tip, difficulty, category));
+        return TypedResults.Ok(new CollectionResponse<GameTip> { Items = [.. tips] });
     }
+
+    private static ServerSentEventsResult<GameTip> StreamTips(
+        SseBroadcaster<GameTip> broadcaster,
+        [FromQuery] TipDifficulty? difficulty,
+        [FromQuery] TipCategory? category,
+        [FromHeader(Name = "Last-Event-ID")] string? lastEventId,
+        CancellationToken cancellationToken)
+    {
+        var stream = broadcaster.StreamAsync(
+            lastEventId,
+            tip => Matches(tip, difficulty, category),
+            cancellationToken);
+
+        return TypedResults.ServerSentEvents(stream);
+    }
+
+    private static bool Matches(GameTip? tip, TipDifficulty? difficulty, TipCategory? category) =>
+        tip is not null
+        && (!difficulty.HasValue || tip.Difficulty == difficulty.Value)
+        && (!category.HasValue || tip.Category == category.Value);
 }

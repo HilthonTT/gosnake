@@ -461,3 +461,11 @@ FodyWeavers.xsd
 *.msp
 cmd/gosnake/gosnake_server
 cmd/gosnake/gosnake_server.pub
+
+# gosnake
+/gosnake
+gosnake_server
+gosnake_server.pub
+gosnake.log
+*.db
+dist/

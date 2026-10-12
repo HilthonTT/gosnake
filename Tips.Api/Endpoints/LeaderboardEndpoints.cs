@@ -1,7 +1,7 @@
-﻿using FluentValidation;
+using FluentValidation;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using System.Net.ServerSentEvents;
+using Microsoft.AspNetCore.OutputCaching;
 using Tips.Api.DTOs.Common;
 using Tips.Api.DTOs.Leaderboard;
 using Tips.Api.Models;
@@ -12,16 +12,16 @@ namespace Tips.Api.Endpoints;
 
 internal static class LeaderboardEndpoints
 {
-    private static readonly TimeSpan SseRetryInterval = TimeSpan.FromSeconds(5);
+    internal const string CacheTag = "leaderboard";
 
-    public static void MapLeaderboardEndpoints(this WebApplication _, IEndpointRouteBuilder routes)
+    public static IEndpointRouteBuilder MapLeaderboardEndpoints(this IEndpointRouteBuilder routes)
     {
         RouteGroupBuilder group = routes.MapGroup("leaderboard")
             .WithTags("Leaderboard");
 
         group.MapGet("/", GetLeaderboard)
             .WithName("GetLeaderboard")
-            .CacheOutput(p => p.Expire(TimeSpan.FromSeconds(10)));
+            .CacheOutput(p => p.Expire(TimeSpan.FromSeconds(10)).SetVaryByQuery("top").Tag(CacheTag));
 
         group.MapGet("realtime", StreamLeaderboard)
             .WithName("LeaderboardRealtime");
@@ -29,12 +29,17 @@ internal static class LeaderboardEndpoints
         group.MapGet("player/{playerName}", GetByPlayer)
             .WithName("GetPlayerScores");
 
+        group.MapGet("{entryId}", GetById)
+            .WithName("GetLeaderboardEntry");
+
         group.MapPost("/", SubmitScore)
             .WithName("SubmitScore")
-            .RequireRateLimiting("default");
+            .RequireRateLimiting(DependencyInjection.SubmitRateLimitPolicy);
 
         group.MapDelete("{entryId}", DeleteEntry)
             .WithName("DeleteLeaderboardEntry");
+
+        return routes;
     }
 
     private static Ok<CollectionResponse<LeaderboardEntry>> GetLeaderboard(
@@ -42,14 +47,7 @@ internal static class LeaderboardEndpoints
         [FromQuery] int top = 100)
     {
         top = Math.Clamp(top, 1, 1000);
-        var entries = repo.GetTopN(top);
-
-        var response = new CollectionResponse<LeaderboardEntry>()
-        {
-            Items = entries.ToList()
-        };
-
-        return TypedResults.Ok(response);
+        return TypedResults.Ok(new CollectionResponse<LeaderboardEntry> { Items = [.. repo.GetTopN(top)] });
     }
 
     private static Results<Ok<CollectionResponse<LeaderboardEntry>>, NotFound> GetByPlayer(
@@ -58,22 +56,28 @@ internal static class LeaderboardEndpoints
     {
         var entries = repo.GetByPlayer(playerName);
 
-        var response = new CollectionResponse<LeaderboardEntry>()
-        {
-            Items = entries.ToList()
-        };
-
         return entries.Count > 0
-            ? TypedResults.Ok(response)
+            ? TypedResults.Ok(new CollectionResponse<LeaderboardEntry> { Items = [.. entries] })
             : TypedResults.NotFound();
     }
 
-    private static async Task<Results<Created<LeaderboardEntry>, ValidationProblem>> SubmitScore(
+    private static Results<Ok<LeaderboardEntry>, NotFound> GetById(string entryId, ILeaderboardRepository repo)
+    {
+        return repo.GetById(entryId) is { } entry
+            ? TypedResults.Ok(entry)
+            : TypedResults.NotFound();
+    }
+
+    private static async Task<Created<LeaderboardEntry>> SubmitScore(
         SubmitScoreRequest request,
         ILeaderboardRepository repo,
-        IValidator<SubmitScoreRequest> validator)
+        IValidator<SubmitScoreRequest> validator,
+        SseBroadcaster<LeaderboardChangeEvent> broadcaster,
+        IOutputCacheStore cache,
+        CancellationToken cancellationToken)
     {
-        await validator.ValidateAndThrowAsync(request);
+        // Throws ValidationException, which ValidationExceptionHandler maps to a 400.
+        await validator.ValidateAndThrowAsync(request, cancellationToken);
 
         var entry = repo.Add(
             request.PlayerName.Trim(),
@@ -81,74 +85,35 @@ internal static class LeaderboardEndpoints
             request.Level,
             request.SnakeLength);
 
-        return TypedResults.Created($"/leaderboard/{entry.EntryId}", entry);
+        broadcaster.Publish(new LeaderboardChangeEvent(LeaderboardChangeType.EntryAdded, entry));
+        await cache.EvictByTagAsync(CacheTag, cancellationToken);
+
+        return TypedResults.Created($"/api/v1/leaderboard/{entry.EntryId}", entry);
     }
 
-    private static Results<NoContent, NotFound> DeleteEntry(
+    private static async Task<Results<NoContent, NotFound>> DeleteEntry(
         string entryId,
-        ILeaderboardRepository repo)
+        ILeaderboardRepository repo,
+        SseBroadcaster<LeaderboardChangeEvent> broadcaster,
+        IOutputCacheStore cache,
+        CancellationToken cancellationToken)
     {
-        return repo.Delete(entryId)
-            ? TypedResults.NoContent()
-            : TypedResults.NotFound();
+        if (repo.Delete(entryId) is not { } removed)
+        {
+            return TypedResults.NotFound();
+        }
+
+        broadcaster.Publish(new LeaderboardChangeEvent(LeaderboardChangeType.EntryDeleted, removed));
+        await cache.EvictByTagAsync(CacheTag, cancellationToken);
+
+        return TypedResults.NoContent();
     }
 
-    private static ServerSentEventsResult<SseItem<LeaderboardChangeEvent>> StreamLeaderboard(
-        LeaderboardBroadcastManager broadcastManager,
-        LeaderboardEventBuffer eventBuffer,
-        ILoggerFactory loggerFactory,
+    private static ServerSentEventsResult<LeaderboardChangeEvent> StreamLeaderboard(
+        SseBroadcaster<LeaderboardChangeEvent> broadcaster,
         [FromHeader(Name = "Last-Event-ID")] string? lastEventId,
         CancellationToken cancellationToken)
     {
-        ILogger logger = loggerFactory.CreateLogger("SnakeTips.Leaderboard.Stream");
-        var (connectionId, reader) = broadcastManager.Subscribe();
-
-        async IAsyncEnumerable<SseItem<LeaderboardChangeEvent>> Stream()
-        {
-            // Tell the client how long to wait before reconnecting.
-            yield return new SseItem<LeaderboardChangeEvent>(default!)
-            {
-                ReconnectionInterval = SseRetryInterval,
-            };
-
-            // Replay any events the client missed since its last connection.
-            if (!string.IsNullOrWhiteSpace(lastEventId))
-            {
-                var missed = eventBuffer.GetEventsAfter(lastEventId);
-
-                if (logger.IsEnabled(LogLevel.Debug))
-                {
-                    logger.LogDebug(
-                        "Replaying {Count} missed leaderboard event(s) for {ConnectionId}",
-                        missed.Count, connectionId);
-                }
-
-                foreach (var item in missed)
-                {
-                    yield return item;
-                }
-            }
-
-            // Stream live events until the client disconnects.
-            try
-            {
-                await foreach (var change in reader.ReadAllAsync(cancellationToken))
-                {
-                    yield return eventBuffer.Add(change);
-                }
-            }
-            finally
-            {
-                broadcastManager.Unsubscribe(connectionId);
-
-                if (logger.IsEnabled(LogLevel.Information))
-                {
-                    logger.LogInformation(
-                        "Leaderboard SSE stream closed for {ConnectionId}", connectionId);
-                }
-            }
-        }
-
-        return TypedResults.ServerSentEvents(Stream(), eventType: "leaderboard-change");
+        return TypedResults.ServerSentEvents(broadcaster.StreamAsync(lastEventId, filter: null, cancellationToken));
     }
 }
