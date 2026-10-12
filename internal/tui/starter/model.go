@@ -204,6 +204,7 @@ func (m *Model) setChild(mode tui.Mode, switchIn tui.SwitchModeInput) error {
 		child, err := views.NewSingleModel(singleIn, views.SingleDeps{
 			Keys:      m.cfg.Keys,
 			Submitter: m.submitter,
+			BestScore: m.bestScore(singleIn.Mode),
 		})
 		if err != nil {
 			return fmt.Errorf("creating single model: %w", err)
@@ -247,6 +248,15 @@ func (m *Model) prepareLeaderboard(in *tui.LeaderboardInput) error {
 	}
 	in.SetEntries(entries)
 	return nil
+}
+
+// bestScore is the local record for mode, or 0 if unknown.
+func (m *Model) bestScore(mode tui.Mode) int {
+	top, err := m.leaderboardRepo.GetTopNByMode(1, views.GameModeFromTUI(mode))
+	if err != nil || len(top) == 0 {
+		return 0
+	}
+	return top[0].Score
 }
 
 func (m *Model) initChild() tea.Cmd {

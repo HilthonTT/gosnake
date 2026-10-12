@@ -107,8 +107,8 @@ func TestViewsRenderInAltScreen(t *testing.T) {
 		want string
 	}{
 		{"menu", tui.ModeMenu, tui.NewMenuInput(), "eat, grow, survive"},
-		{"normal", tui.ModeNormal, tui.NewSingleInput(tui.ModeNormal, 1, "t"), "SNAKE ON"},
-		{"crazy", tui.ModeCrazy, tui.NewSingleInput(tui.ModeCrazy, 1, "t"), "CRAZY MODE"},
+		{"normal", tui.ModeNormal, tui.NewSingleInput(tui.ModeNormal, 1, "t"), "NORMAL"},
+		{"crazy", tui.ModeCrazy, tui.NewSingleInput(tui.ModeCrazy, 1, "t"), "CRAZY"},
 		{"ai", tui.ModeAI, tui.NewSingleInput(tui.ModeAI, 1, "t"), "VS AI"},
 		{"leaderboard", tui.ModeLeaderboard, tui.NewLeaderboardInput(), "sorted by"},
 	}
@@ -127,5 +127,18 @@ func TestViewsRenderInAltScreen(t *testing.T) {
 				t.Errorf("view does not contain %q", tc.want)
 			}
 		})
+	}
+}
+
+func TestGameWaitsForFirstMove(t *testing.T) {
+	m := newTestModel(t, tui.ModeNormal, tui.NewSingleInput(tui.ModeNormal, 1, "t"))
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 45})
+	if v := m.View().Content; !strings.Contains(v, "press a direction to start") {
+		t.Error("game should wait for the first direction key")
+	}
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if v := m.View().Content; strings.Contains(v, "press a direction to start") {
+		t.Error("a direction key should start the game")
 	}
 }

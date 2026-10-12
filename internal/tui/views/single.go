@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"log/slog"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
+	"github.com/HilthonTT/gosnake/internal/tui/theme"
 	"github.com/HilthonTT/gosnake/pkg/snake"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/ai"
 	"github.com/HilthonTT/gosnake/pkg/snake/modes/crazy"
@@ -26,24 +28,37 @@ import (
 )
 
 const (
-	pausedBanner = `
-    ____                            __
-   / __ \____ ___  __________  ____/ /
-  / /_/ / __ ^/ / / / ___/ _ \/ __  /
- / ____/ /_/ / /_/ (__  )  __/ /_/ /
-/_/    \__,_/\__,_/____/\___/\__,_/`
-
-	gameOverBanner = `
-   ______                        ____
-  / ____/___ _____ ___  ___     / __ \_   _____  _____
- / / __/ __ ^/ __ ^__ \/ _ \   / / / / | / / _ \/ ___/
-/ /_/ / /_/ / / / / / /  __/  / /_/ /| |/ /  __/ /
-\____/\__,_/_/ /_/ /_/\___/   \____/ |___/\___/_/`
-
-	TimerUpdateInterval = time.Millisecond * 13
+	// TimerUpdateInterval is how often the elapsed-time display refreshes.
+	TimerUpdateInterval = 100 * time.Millisecond
 
 	scoreSubmitTimeout = 10 * time.Second
+
+	sidebarWidth = 24
 )
+
+// Board pixel colours.
+var (
+	colBoardA   = lipgloss.Color("#142016")
+	colBoardB   = lipgloss.Color("#18261A")
+	colWall     = lipgloss.Color("#34453A")
+	colHead     = lipgloss.Color("#D9F99D")
+	colFood     = theme.Gold
+	colBomb     = lipgloss.Color("#EF4444")
+	colBombFuse = lipgloss.Color("#9F1239")
+	colAIHead   = lipgloss.Color("#7DD3FC")
+	colAIBody   = lipgloss.Color("#0284C7")
+
+	// bodyRamp fades the player's body from just behind the head to the tail.
+	bodyRamp = lipgloss.Blend1D(16, theme.Accent, lipgloss.Color("#3F6212"))
+)
+
+var sidebarStyle = theme.Panel.
+	Width(sidebarWidth).
+	Padding(1, 1)
+
+var modalStyle = theme.Panel.
+	Padding(1, 4).
+	Align(lipgloss.Center)
 
 // ScoreSubmitter sends finished games to the online leaderboard.
 type ScoreSubmitter interface {
@@ -57,6 +72,9 @@ type SingleDeps struct {
 
 	// Submitter publishes the final score online; nil disables it.
 	Submitter ScoreSubmitter
+
+	// BestScore is the local record for this mode, shown as the score to beat.
+	BestScore int
 }
 
 var _ tea.Model = &SingleModel{}
@@ -66,6 +84,10 @@ type SingleModel struct {
 	game     snake.GameController
 	mode     tui.Mode
 
+	// started is false until the player presses a direction, so the board
+	// doesn't start moving before they've had a chance to look at it.
+	started bool
+
 	// tickStopwatch drives the snake's movement; its interval shrinks as the
 	// level rises.
 	tickStopwatch components.Stopwatch
@@ -73,11 +95,11 @@ type SingleModel struct {
 	// gameStopwatch measures total elapsed play time for the info panel.
 	gameStopwatch components.Stopwatch
 
-	help   help.Model
-	keys   *components.GameKeyMap
-	styles *components.GameStyles
+	help help.Model
+	keys *components.GameKeyMap
 
 	submitter ScoreSubmitter
+	bestScore int
 
 	width  int
 	height int
@@ -107,22 +129,20 @@ func NewSingleModel(in *tui.SingleInput, deps SingleDeps) (*SingleModel, error) 
 
 	return &SingleModel{
 		username:      in.Username,
-		help:          help.New(),
+		help:          theme.NewHelp(),
 		game:          g,
 		keys:          components.NewGameKeyMap(deps.Keys),
 		tickStopwatch: components.NewStopwatchWithInterval(g.GetTickInterval()),
 		gameStopwatch: components.NewStopwatchWithInterval(TimerUpdateInterval),
-		styles:        components.CreateGameStyles(),
 		submitter:     deps.Submitter,
+		bestScore:     deps.BestScore,
 		mode:          in.Mode,
 	}, nil
 }
 
+// Init does not start the clocks; the first direction key does.
 func (m *SingleModel) Init() tea.Cmd {
-	return tea.Batch(
-		m.tickStopwatch.Init(),
-		m.gameStopwatch.Init(),
-	)
+	return nil
 }
 
 func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -144,6 +164,10 @@ func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Don't let the snake run blind while the board can't be seen.
+		if _, fits := m.layout(); !fits && m.isRunning() {
+			cmds = append(cmds, m.togglePause())
+		}
 		return m, tea.Batch(cmds...)
 	}
 
@@ -151,6 +175,8 @@ func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.game.IsGameOver():
 		m, cmd = m.gameOverUpdate(msg)
+	case !m.started:
+		m, cmd = m.readyUpdate(msg)
 	case m.game.IsPaused():
 		m, cmd = m.pausedUpdate(msg)
 	default:
@@ -161,30 +187,86 @@ func (m *SingleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *SingleModel) isRunning() bool {
+	return m.started && !m.game.IsPaused() && !m.game.IsGameOver()
+}
+
+// layout picks the largest board scale that fits the terminal.
+func (m *SingleModel) layout() (components.Scale, bool) {
+	if m.width == 0 && m.height == 0 {
+		return components.ScaleCompact, true // size not known yet
+	}
+	for _, scale := range []components.Scale{components.ScaleLarge, components.ScaleCompact} {
+		w, h := m.requiredSize(scale)
+		if m.width >= w && m.height >= h {
+			return scale, true
+		}
+	}
+	return components.ScaleCompact, false
+}
+
+func (m *SingleModel) requiredSize(scale components.Scale) (int, int) {
+	bw, bh := components.BoardSize(snake.DefaultRows, snake.DefaultCols, scale)
+	return sidebarWidth + 1 + bw, bh + 2 // gap column; blank line + help line
+}
+
 func (m *SingleModel) View() tea.View {
-	var board string
-	switch {
-	case m.game.IsGameOver():
-		hint := fmt.Sprintf("Press %s to see the leaderboard.", strings.ToUpper(m.keys.Quit.Help().Key))
-		board = m.overlayView(m.styles.Overlay.GameOver, gameOverBanner, m.resultLine(), hint)
-	case m.game.IsPaused():
-		hint := fmt.Sprintf("Press %s to resume or %s to quit.",
-			strings.ToUpper(m.keys.Pause.Help().Key), strings.ToUpper(m.keys.Quit.Help().Key))
-		board = m.overlayView(m.styles.Overlay.Paused, pausedBanner, hint)
-	default:
-		board = m.matrixView()
+	scale, fits := m.layout()
+	if !fits {
+		w, h := m.requiredSize(components.ScaleCompact)
+		return tea.NewView(theme.TooSmall(m.width, m.height, w, h))
+	}
+
+	board := m.boardView(scale)
+	if modal := m.modalView(); modal != "" {
+		board = components.Overlay(board, modal)
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.infoView(),
+		m.sidebarView(lipgloss.Height(board)),
+		" ",
 		board,
 	)
-	content = lipgloss.JoinVertical(lipgloss.Left,
+	content = lipgloss.JoinVertical(lipgloss.Center,
 		content,
-		m.styles.Help.Render(m.help.View(m.keys)),
+		"",
+		m.helpView(),
 	)
 
 	return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content))
+}
+
+// keyList is a help.KeyMap over a fixed set of bindings.
+type keyList []key.Binding
+
+func (k keyList) ShortHelp() []key.Binding  { return k }
+func (k keyList) FullHelp() [][]key.Binding { return [][]key.Binding{k} }
+
+// relabel returns a copy of b with a different help description.
+func relabel(b key.Binding, desc string) key.Binding {
+	b.SetHelp(b.Help().Key, desc)
+	return b
+}
+
+// helpView shows the keys that do something in the current state, or every
+// binding when the full help is toggled on.
+func (m *SingleModel) helpView() string {
+	if m.help.ShowAll {
+		return m.help.View(m.keys)
+	}
+
+	var keys keyList
+	switch {
+	case m.game.IsGameOver():
+		keys = keyList{relabel(m.keys.Submit, "leaderboard")}
+	case !m.started:
+		keys = keyList{relabel(m.keys.Move, "start"), m.keys.Quit}
+	case m.game.IsPaused():
+		keys = keyList{relabel(m.keys.Pause, "resume"), m.keys.Quit}
+	default:
+		keys = keyList{m.keys.Move, m.keys.Pause}
+	}
+	return m.help.View(append(keys, m.keys.Help))
 }
 
 // dependenciesUpdate keeps both stopwatches ticking regardless of game state.
@@ -197,13 +279,13 @@ func (m *SingleModel) dependenciesUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 }
 
 func (m *SingleModel) gameOverUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyPressMsg); ok && key.Matches(msg, m.keys.Quit) {
+	if msg, ok := msg.(tea.KeyPressMsg); ok && (key.Matches(msg, m.keys.Submit) || key.Matches(msg, m.keys.Quit)) {
 		newEntry := &data.LeaderboardEntry{
 			Name:      m.username,
 			Score:     m.game.Score(),
 			Level:     m.game.Level(),
 			CreatedAt: time.Now().Format(time.DateTime),
-			Mode:      gameModeFromTUI(m.mode),
+			Mode:      GameModeFromTUI(m.mode),
 		}
 
 		return m, tui.SwitchModeCmd(
@@ -222,20 +304,51 @@ func (m *SingleModel) togglePause() tea.Cmd {
 	)
 }
 
-func (m *SingleModel) playingKeyUpdate(msg tea.KeyPressMsg) (*SingleModel, tea.Cmd) {
+// direction maps a key press to a movement direction.
+func (m *SingleModel) direction(msg tea.KeyPressMsg) (snake.Direction, bool) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		m.game.ChangeDirection(snake.Up)
+		return snake.Up, true
 	case key.Matches(msg, m.keys.Down):
-		m.game.ChangeDirection(snake.Down)
+		return snake.Down, true
 	case key.Matches(msg, m.keys.Left):
-		m.game.ChangeDirection(snake.Left)
+		return snake.Left, true
 	case key.Matches(msg, m.keys.Right):
-		m.game.ChangeDirection(snake.Right)
-	case key.Matches(msg, m.keys.Pause):
-		return m, m.togglePause()
-	case key.Matches(msg, m.keys.Quit):
+		return snake.Right, true
+	}
+	return 0, false
+}
+
+func (m *SingleModel) readyUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
+	msgKey, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	if key.Matches(msgKey, m.keys.Quit) {
 		return m, tea.Quit
+	}
+	if _, fits := m.layout(); !fits {
+		return m, nil
+	}
+	dir, isDir := m.direction(msgKey)
+	if !isDir && !key.Matches(msgKey, m.keys.Submit) {
+		return m, nil
+	}
+	if isDir {
+		m.game.ChangeDirection(dir)
+	}
+	m.started = true
+	return m, tea.Batch(m.tickStopwatch.Init(), m.gameStopwatch.Init())
+}
+
+func (m *SingleModel) playingKeyUpdate(msg tea.KeyPressMsg) (*SingleModel, tea.Cmd) {
+	if dir, ok := m.direction(msg); ok {
+		m.game.ChangeDirection(dir)
+		return m, nil
+	}
+	// Quit pauses first, so a stray key press can't throw away a run.
+	if key.Matches(msg, m.keys.Pause) || key.Matches(msg, m.keys.Quit) {
+		return m, m.togglePause()
 	}
 	return m, nil
 }
@@ -243,8 +356,10 @@ func (m *SingleModel) playingKeyUpdate(msg tea.KeyPressMsg) (*SingleModel, tea.C
 func (m *SingleModel) pausedUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch {
-		case key.Matches(msg, m.keys.Pause):
-			return m, m.togglePause()
+		case key.Matches(msg, m.keys.Pause), key.Matches(msg, m.keys.Submit):
+			if _, fits := m.layout(); fits {
+				return m, m.togglePause()
+			}
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}
@@ -280,34 +395,138 @@ func (m *SingleModel) playingUpdate(msg tea.Msg) (*SingleModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m *SingleModel) matrixView() string {
+func (m *SingleModel) boardView(scale components.Scale) string {
 	matrix := m.game.Matrix()
 
-	var sb strings.Builder
-	for row := range matrix {
-		for col := range matrix[row] {
-			sb.WriteString(m.renderCell(matrix[row][col]))
-		}
-		if row < len(matrix)-1 {
-			sb.WriteByte('\n')
-		}
+	// Index each body segment so the body can fade from head to tail.
+	body := m.game.Snake()
+	segment := make(map[snake.Point]int, len(body))
+	for i, p := range body {
+		segment[p] = i
 	}
 
-	return m.styles.Board.Render(sb.String())
+	blinkOn := (time.Now().UnixMilli()/crazy.BombBlinkPeriodMs)%2 == 0
+	dim := !m.isRunning()
+
+	shade := func(c color.Color) color.Color {
+		if dim && c != nil {
+			return lipgloss.Darken(c, 0.5)
+		}
+		return c
+	}
+	colors := components.BoardColors{
+		Wall: shade(colWall),
+		Empty: func(row, col int) color.Color {
+			// A subtle checkerboard makes distances easier to judge.
+			if (row+col)%2 == 1 {
+				return shade(colBoardB)
+			}
+			return shade(colBoardA)
+		},
+	}
+
+	return components.RenderBoard(len(matrix), len(matrix[0]), scale, colors, func(row, col int) color.Color {
+		var c color.Color
+		switch matrix[row][col] {
+		case snake.CellHead:
+			c = colHead
+		case snake.CellBody:
+			i := segment[snake.Point{X: col, Y: row}]
+			c = bodyRamp[(i*(len(bodyRamp)-1))/max(len(body)-1, 1)]
+		case snake.CellFood:
+			c = colFood
+		case snake.CellBomb:
+			c = colBomb
+		case snake.CellBombWarning:
+			if blinkOn || dim {
+				c = colBombFuse
+			}
+		case snake.CellAIHead:
+			c = colAIHead
+		case snake.CellAIBody:
+			c = colAIBody
+		}
+		return shade(c)
+	})
 }
 
-func (m *SingleModel) overlayView(style lipgloss.Style, banner string, lines ...string) string {
-	const (
-		innerW = snake.DefaultCols * 2 // two chars per cell
-		innerH = snake.DefaultRows
-	)
+// modalView is the dialog drawn over the board, if any.
+func (m *SingleModel) modalView() string {
 
-	text := lipgloss.JoinVertical(lipgloss.Center, append([]string{banner, ""}, lines...)...)
-	inner := lipgloss.Place(innerW, innerH,
-		lipgloss.Center, lipgloss.Center,
-		style.Render(text),
-	)
-	return m.styles.Board.Render(inner)
+	switch {
+	case m.game.IsGameOver():
+		title, accent := "GAME OVER", theme.Danger
+		if vs, ok := m.game.(snake.AIGameController); ok {
+			switch vs.Outcome() {
+			case snake.OutcomeWin:
+				title, accent = "YOU WIN", theme.Accent
+			case snake.OutcomeDraw:
+				title, accent = "DRAW", theme.Warning
+			}
+		}
+
+		const w = 20
+		lines := []string{lipgloss.NewStyle().Foreground(accent).Bold(true).Render(title)}
+		if result := m.resultLine(); result != "" {
+			lines = append(lines, theme.Label.Render(result))
+		}
+		lines = append(lines, "",
+			theme.SpaceBetween(w, theme.Label.Render("Score"), theme.Score.Render(fmt.Sprint(m.game.Score()))),
+			theme.SpaceBetween(w, theme.Label.Render("Level"), theme.Value.Render(fmt.Sprint(m.game.Level()))),
+			theme.SpaceBetween(w, theme.Label.Render("Length"), theme.Value.Render(fmt.Sprint(m.game.SnakeLength()))),
+			theme.SpaceBetween(w, theme.Label.Render("Time"), theme.Value.Render(formatElapsed(m.gameStopwatch.Elapsed()))),
+		)
+		if m.isNewBest() {
+			lines = append(lines, "", theme.Title.Render("★ new record! ★"))
+		}
+		lines = append(lines, "", keyRows(relabel(m.keys.Submit, "leaderboard")))
+		return modalStyle.BorderForeground(accent).Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
+
+	case !m.started:
+		greeting := "READY?"
+		if m.username != "" {
+			greeting = "READY, " + strings.ToUpper(truncate(m.username, 12)) + "?"
+		}
+		return modalStyle.BorderForeground(theme.Accent).Render(lipgloss.JoinVertical(lipgloss.Center,
+			theme.Title.Render(greeting),
+			"",
+			keyRows(m.keys.Move, m.keys.Pause),
+			"",
+			theme.Hint.Render("press a direction to start"),
+		))
+
+	case m.game.IsPaused():
+		return modalStyle.BorderForeground(theme.Warning).Render(lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).Render("PAUSED"),
+			"",
+			keyRows(relabel(m.keys.Pause, "resume"), m.keys.Quit),
+		))
+	}
+	return ""
+}
+
+// keyRows lists bindings as aligned "key  description" lines.
+func keyRows(bindings ...key.Binding) string {
+	w := 0
+	for _, b := range bindings {
+		w = max(w, lipgloss.Width(b.Help().Key))
+	}
+	lines := make([]string, len(bindings))
+	for i, b := range bindings {
+		lines[i] = theme.Key.Render(pad(b.Help().Key, w+2, false)) + theme.Hint.Render(b.Help().Desc)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func modeBadge(mode tui.Mode) string {
+	if mode == tui.ModeAI {
+		return "VS AI"
+	}
+	return strings.ToUpper(mode.String())
+}
+
+func (m *SingleModel) isNewBest() bool {
+	return m.game.Score() > 0 && m.game.Score() > m.bestScore
 }
 
 // resultLine describes how a versus game ended; empty for solo modes.
@@ -318,119 +537,121 @@ func (m *SingleModel) resultLine() string {
 	}
 	switch vs.Outcome() {
 	case snake.OutcomeWin:
-		return "You outlasted the AI — you win!"
+		return "You outlasted the AI."
 	case snake.OutcomeLoss:
-		return "The AI got you — you lose."
+		return "The AI got you."
 	case snake.OutcomeDraw:
-		return "Head-on collision — it's a draw."
+		return "Head-on collision."
 	default:
 		return ""
 	}
 }
 
-func (m *SingleModel) renderCell(cell byte) string {
-	chars := m.styles.CellChars
-	switch cell {
-	case snake.CellHead:
-		return m.styles.HeadCell.Render(chars.Head)
-	case snake.CellBody:
-		return m.styles.BodyCell.Render(chars.Body)
-	case snake.CellFood:
-		return m.styles.FoodCell.Render(chars.Food)
-	case snake.CellBomb:
-		// Active bomb — always shown with a distinctive style.
-		return m.styles.BombCell.Render(chars.Bomb)
-	case snake.CellBombWarning:
-		// Warning bomb — blinks by alternating between the warning glyph and
-		// an empty cell based on wall-clock milliseconds.
-		if (time.Now().UnixMilli()/crazy.BombBlinkPeriodMs)%2 == 0 {
-			return m.styles.BombWarningCell.Render(chars.BombWarning)
-		}
-		return m.styles.EmptyCell.Render(chars.Empty)
-	case snake.CellAIHead:
-		return m.styles.AIHeadCell.Render(chars.AIHead)
-	case snake.CellAIBody:
-		return m.styles.AIBodyCell.Render(chars.AIBody)
-	default:
-		return m.styles.EmptyCell.Render(chars.Empty)
+func (m *SingleModel) sidebarView(height int) string {
+	frameW, frameH := sidebarStyle.GetFrameSize()
+	w := sidebarWidth - frameW
+
+	row := func(label, value string) string {
+		return theme.SpaceBetween(w, theme.Label.Render(label), value)
 	}
-}
+	num := func(n int) string { return theme.Value.Render(fmt.Sprint(n)) }
 
-func (m *SingleModel) infoView() string {
-	s := m.styles.Info
-	divider := s.Divider.Render(strings.Repeat("─", 12))
-
-	vs, isVersus := m.game.(snake.AIGameController)
-
-	var headerText string
-	switch {
-	case m.game.IsGameOver() && isVersus && vs.Outcome() == snake.OutcomeWin:
-		headerText = "YOU WIN"
-	case m.game.IsGameOver():
-		headerText = "GAME OVER"
-	case m.game.IsPaused():
-		headerText = "PAUSED"
-	case m.mode == tui.ModeCrazy:
-		headerText = "CRAZY MODE"
-	case isVersus:
-		headerText = "VS AI"
-	default:
-		headerText = "SNAKE ON"
+	score := m.game.Score()
+	best := max(m.bestScore, score)
+	bestStyle := theme.Value
+	if m.isNewBest() {
+		bestStyle = theme.Title
 	}
 
-	section := func(label, value string) []string {
-		return []string{s.SectionLbl.Render(label), s.ValueBig.Render(value)}
-	}
-	join := func(sections ...[]string) string {
-		var parts []string
-		for i, sec := range sections {
-			if i > 0 {
-				parts = append(parts, "\n", divider, "\n")
-			}
-			parts = append(parts, sec...)
-		}
-		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	level := m.game.Level()
+	progress := 1.0
+	if level < snake.MaxLevel {
+		progress = float64(score%snake.PointsPerLevel) / snake.PointsPerLevel
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		s.Title.Render(headerText),
-		"\n",
-		join(
-			section("Score", fmt.Sprint(m.game.Score())),
-			section("Level", fmt.Sprint(m.game.Level())),
-			section("Time", formatElapsed(m.gameStopwatch.Elapsed())),
-			section("Length", fmt.Sprint(m.game.SnakeLength())),
-		),
-	)
+	lines := []string{
+		theme.Badge.Render(modeBadge(m.mode)),
+		theme.Label.Render(truncate(m.username, w)),
+		"",
+		row("Score", theme.Score.Render(fmt.Sprint(score))),
+		row("Best", bestStyle.Render(fmt.Sprint(best))),
+		row("Level", theme.Value.Render(fmt.Sprintf("%d", level))+theme.Hint.Render(fmt.Sprintf("/%d", snake.MaxLevel))),
+		theme.ProgressBar(w, progress),
+		row("Length", num(m.game.SnakeLength())),
+		row("Time", theme.Value.Render(formatElapsed(m.gameStopwatch.Elapsed()))),
+	}
 
-	if isVersus {
-		aiStatus := "ALIVE"
+	if vs, ok := m.game.(snake.AIGameController); ok {
+		status := lipgloss.NewStyle().Foreground(theme.Accent).Render("● alive")
 		if !vs.IsAIAlive() {
-			aiStatus = "DEAD"
+			status = lipgloss.NewStyle().Foreground(theme.Danger).Render("✕ crashed")
 		}
-
-		body = lipgloss.JoinVertical(lipgloss.Left,
-			body,
-			"\n", divider, "\n",
-			s.AILabel.Render("── AI ──"),
-			"\n",
-			join(
-				section("Score", fmt.Sprint(vs.AIScore())),
-				section("Length", fmt.Sprint(vs.AISnakeLength())),
-				section("Status", aiStatus),
-			),
+		lines = append(lines,
+			"",
+			lipgloss.NewStyle().Foreground(colAIHead).Bold(true).Render("AI ")+
+				lipgloss.NewStyle().Foreground(theme.Border).Render(strings.Repeat("─", w-3)),
+			row("Score", theme.Score.Render(fmt.Sprint(vs.AIScore()))),
+			row("Length", num(vs.AISnakeLength())),
+			row("Status", status),
 		)
 	}
 
-	return s.Panel.Render(body)
+	lines = append(lines, "")
+	legend := m.legend()
+	inner := height - frameH
+	if gap := inner - len(lines) - len(legend); gap > 0 {
+		lines = append(lines, make([]string, gap)...) // push the legend to the bottom
+	}
+	lines = append(lines, legend...)
+
+	return sidebarStyle.Height(height).Render(strings.Join(lines, "\n"))
 }
 
-// formatElapsed renders "SS.cc" under a minute and "MM:SS" afterwards.
-func formatElapsed(d time.Duration) string {
-	if d >= time.Minute {
-		return fmt.Sprintf("%02d:%02d", int(d.Minutes()), int(d.Seconds())%60)
+// legend explains the board colours used by the current mode.
+func (m *SingleModel) legend() []string {
+	swatch := func(c color.Color, label string) string {
+		return lipgloss.NewStyle().Foreground(c).Render("■ ") + theme.Hint.Render(fmt.Sprintf("%-7s", label))
 	}
-	return fmt.Sprintf("%02d.%02d", int(d.Seconds()), int(d.Milliseconds()/10)%100)
+
+	items := []string{swatch(theme.Accent, "you"), swatch(colFood, "food")}
+	switch m.mode {
+	case tui.ModeCrazy:
+		items = append(items, swatch(colBomb, "bomb"), swatch(colBombFuse, "fuse"))
+	case tui.ModeAI:
+		items = append(items, swatch(colAIBody, "ai"))
+	}
+
+	var lines []string
+	for i := 0; i < len(items); i += 2 {
+		lines = append(lines, strings.Join(items[i:min(i+2, len(items))], " "))
+	}
+	return lines
+}
+
+// truncate shortens s to at most w columns, adding an ellipsis if cut.
+func truncate(s string, w int) string {
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	r := []rune(s)
+	for len(r) > 0 && lipgloss.Width(string(r))+1 > w {
+		r = r[:len(r)-1]
+	}
+	return string(r) + "…"
+}
+
+// pad aligns s within w columns.
+func pad(s string, w int, right bool) string {
+	fill := strings.Repeat(" ", max(w-lipgloss.Width(s), 0))
+	if right {
+		return fill + s
+	}
+	return s + fill
+}
+
+// formatElapsed renders "M:SS".
+func formatElapsed(d time.Duration) string {
+	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 // submitScore publishes the result to the online leaderboard, if configured.
@@ -457,7 +678,8 @@ func (m *SingleModel) submitScore() {
 	}()
 }
 
-func gameModeFromTUI(m tui.Mode) data.GameMode {
+// GameModeFromTUI maps a TUI mode to the mode stored with leaderboard entries.
+func GameModeFromTUI(m tui.Mode) data.GameMode {
 	switch m {
 	case tui.ModeCrazy:
 		return data.GameModeCrazy

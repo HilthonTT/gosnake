@@ -1,6 +1,7 @@
 package components
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -21,6 +22,10 @@ type GameKeyMap struct {
 	Quit      key.Binding
 	ForceQuit key.Binding
 	Help      key.Binding
+	Submit    key.Binding
+
+	// Move is display-only: it summarises the four direction keys in help.
+	Move key.Binding
 }
 
 // NewGameKeyMap builds the game key map from the user's configured keys.
@@ -30,7 +35,7 @@ func NewGameKeyMap(keys *config.Keys) *GameKeyMap {
 		keys = config.DefaultKeys()
 	}
 
-	return &GameKeyMap{
+	km := &GameKeyMap{
 		Up:        NewBinding(keys.Up, "up"),
 		Down:      NewBinding(keys.Down, "down"),
 		Left:      NewBinding(keys.Left, "left"),
@@ -39,7 +44,11 @@ func NewGameKeyMap(keys *config.Keys) *GameKeyMap {
 		Quit:      NewBinding(keys.Quit, "quit"),
 		ForceQuit: NewBinding(keys.ForceQuit, "force quit"),
 		Help:      NewBinding(keys.Help, "help"),
+		Submit:    NewBinding(keys.Submit, "continue"),
+		Move:      NewBinding(slices.Concat(keys.Up, keys.Down, keys.Left, keys.Right), "move"),
 	}
+	km.Move.SetHelp(moveLabel(keys), "move")
+	return km
 }
 
 // NewBinding creates a binding whose help text lists every key.
@@ -69,15 +78,26 @@ func KeyLabel(keys []string) string {
 	return strings.Join(labels, "/")
 }
 
+// moveLabel shows the first key of each direction, e.g. "↑↓←→".
+func moveLabel(keys *config.Keys) string {
+	var sb strings.Builder
+	for _, dir := range [][]string{keys.Up, keys.Down, keys.Left, keys.Right} {
+		if len(dir) > 0 {
+			sb.WriteString(KeyLabel(dir[:1]))
+		}
+	}
+	return sb.String()
+}
+
 // ShortHelp satisfies help.KeyMap.
 func (k *GameKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Pause, k.Quit, k.Help}
+	return []key.Binding{k.Move, k.Pause, k.Quit, k.Help}
 }
 
 // FullHelp satisfies help.KeyMap.
 func (k *GameKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Pause, k.Quit, k.ForceQuit, k.Help},
+		{k.Pause, k.Submit, k.Quit, k.ForceQuit, k.Help},
 	}
 }
