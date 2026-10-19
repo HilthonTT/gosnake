@@ -3,7 +3,7 @@
 # Builds the gosnake binary and runs the multiplayer SSH server.
 #   docker run -p 2222:2222 -v gosnake-data:/data ghcr.io/hilthontt/gosnake
 
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
