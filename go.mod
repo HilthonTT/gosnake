@@ -12,7 +12,7 @@ require (
 	charm.land/ssh v0.4.3
 	charm.land/wish/v2 v2.0.5
 	github.com/adrg/xdg v0.5.3
-	github.com/alecthomas/kong v1.16.1
+	github.com/alecthomas/kong v1.17.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/time v0.16.0
 	modernc.org/sqlite v1.60.1
