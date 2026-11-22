@@ -31,6 +31,11 @@ linters:
         linters:
           - gosec
           - errcheck
+      # The GIF recorder is a local dev tool: it reads fonts and writes files
+      # the developer names, and does deliberate colour-byte conversions.
+      - path: ^scripts/
+        linters:
+          - gosec
 
 formatters:
   enable:

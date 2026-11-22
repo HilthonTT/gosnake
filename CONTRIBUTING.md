@@ -13,7 +13,8 @@ Thanks for your interest in improving gosnake. Bug reports, ideas and pull reque
 | `internal/data/` | SQLite leaderboard storage |
 | `internal/tipsapi/` | Client for the online leaderboard |
 | `tips-api/` | ASP.NET Core 11 service and its tests |
-| `docs/assets/` | Logo and social preview |
+| `docs/assets/` | Logo, social preview and README GIFs |
+| `scripts/demo/` | Records the README GIFs: `go run ./scripts/demo -out docs/assets` |
 
 ## Development
 
