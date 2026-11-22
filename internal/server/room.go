@@ -31,6 +31,8 @@ type Room struct {
 	mu      sync.RWMutex
 	players map[string]*Player // keyed by public-key string
 	started bool               // true once the first game has begun
+	closed  bool               // set by Close; no one may join afterwards
+	joins   int64              // join counter, orders observers for promotion
 
 	game *multi.Game // owned by listen(); nil until the game starts
 
@@ -68,20 +70,29 @@ func (r *Room) Close() {
 	r.closeOnce.Do(func() {
 		slog.Info("closing room", "room", r.id)
 
+		r.mu.Lock()
+		r.closed = true
+		r.mu.Unlock()
+
+		// Unregister first so a concurrent join creates a fresh room instead
+		// of landing in this one.
+		if r.onClose != nil {
+			r.onClose(r.id)
+		}
+
 		close(r.done)
 
 		for _, p := range r.snapshotPlayers() {
 			_, _ = p.WriteString("\nThe room has closed. Goodbye!\n")
 			p.closeOnce()
 		}
-
-		if r.onClose != nil {
-			r.onClose(r.id)
-		}
 	})
 }
 
-var errAlreadyConnected = errors.New("you are already connected to this room")
+var (
+	errAlreadyConnected = errors.New("you are already connected to this room")
+	errRoomClosed       = errors.New("this room is closing, please reconnect")
+)
 
 // AddPlayer assigns a session to a player or observer slot and wires it up.
 func (r *Room) AddPlayer(s ssh.Session) (*Player, error) {
@@ -94,11 +105,15 @@ func (r *Room) AddPlayer(s ssh.Session) (*Player, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.closed {
+		return nil, errRoomClosed
+	}
 	if _, ok := r.players[pub.String()]; ok {
 		return nil, errAlreadyConnected
 	}
 
-	p := &Player{room: r, session: s, key: pub}
+	r.joins++
+	p := newPlayer(r, s, pub, r.joins)
 	p.setIndex(-1)
 	if !r.started && r.activePlayersLocked() < multi.MaxPlayers {
 		p.setIndex(r.nextFreeIndexLocked())
@@ -115,6 +130,7 @@ func (r *Room) AddPlayer(s ssh.Session) (*Player, error) {
 	// detects the client's color profile.
 	opts := append(bubbletea.MakeOptions(s), tea.WithWindowSize(ptyInfo.Window.Width, ptyInfo.Window.Height))
 	p.program = tea.NewProgram(p.game, opts...)
+	go p.forward()
 
 	r.players[pub.String()] = p
 
@@ -225,14 +241,17 @@ func (r *Room) listen() {
 			case RestartMsg:
 				// Any player can trigger an immediate restart.
 				resetIdle()
-				r.startGame("Game restarted!")
+				if r.startGame("Game restarted!") {
+					ticker.Reset(snake.GetTickInterval(r.game.Level()))
+				}
 			}
 
 		case <-ticker.C:
 			if r.game == nil {
 				// Start the game once ≥2 players are connected.
-				if len(r.activePlayerNames()) >= 2 {
-					r.startGame("Game started! Good luck!")
+				// startGame re-checks under the lock, since a player may
+				// leave between the two counts.
+				if len(r.activePlayerNames()) >= 2 && r.startGame("Game started! Good luck!") {
 					ticker.Reset(snake.GetTickInterval(r.game.Level()))
 				}
 				continue
@@ -256,12 +275,12 @@ func (r *Room) listen() {
 
 // startGame (re)creates the game for every connected player slot. Slots are
 // compacted first so players who left before the start don't leave a ghost
-// snake behind.
-func (r *Room) startGame(note string) {
+// snake behind. It reports whether a game was started.
+func (r *Room) startGame(note string) bool {
 	names := r.compactSlots()
 	if len(names) < 2 {
 		r.broadcast(NoteMsg("Waiting for more players..."))
-		return
+		return false
 	}
 
 	r.game = multi.NewGame(names)
@@ -270,15 +289,28 @@ func (r *Room) startGame(note string) {
 	r.broadcast(RestartMsg{})
 	r.broadcast(NoteMsg(note))
 	r.broadcastState(nil)
+	return true
 }
 
 // compactSlots renumbers connected players 0..n-1 (keeping their order),
-// marks the room as started, and returns their names in slot order.
+// promotes the longest-waiting observers into any free slots, marks the room
+// as started, and returns the players' names in slot order.
 func (r *Room) compactSlots() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	active := r.activeLocked()
+	if len(active) < multi.MaxPlayers {
+		var observers []*Player
+		for _, p := range r.players {
+			if p.Index() < 0 {
+				observers = append(observers, p)
+			}
+		}
+		slices.SortFunc(observers, func(a, b *Player) int { return int(a.joined - b.joined) })
+		free := multi.MaxPlayers - len(active)
+		active = append(active, observers[:min(free, len(observers))]...)
+	}
 	names := make([]string, len(active))
 	for i, p := range active {
 		p.setIndex(i)

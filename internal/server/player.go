@@ -20,10 +20,32 @@ type Player struct {
 	key     PublicKey
 	once    sync.Once
 	wchan   <-chan ssh.Window
+	joined  int64 // join order within the room
+
+	// out buffers messages for the program, so one slow client can't stall
+	// the room's event loop. quit stops the forwarding goroutine.
+	out  chan tea.Msg
+	quit chan struct{}
 
 	// index is read by the player's UI goroutine and rewritten by the room
 	// when slots are compacted at game start, hence atomic.
 	index atomic.Int64
+}
+
+// outboxSize is how many messages may queue for a slow client before new
+// ones are dropped. Game states are full snapshots, so a dropped one is
+// simply superseded by the next.
+const outboxSize = 64
+
+func newPlayer(r *Room, s ssh.Session, key PublicKey, joined int64) *Player {
+	return &Player{
+		room:    r,
+		session: s,
+		key:     key,
+		joined:  joined,
+		out:     make(chan tea.Msg, outboxSize),
+		quit:    make(chan struct{}),
+	}
 }
 
 // Index returns the player's slot, or -1 for observers.
@@ -43,10 +65,27 @@ func (p *Player) roleString() string {
 	return "Observer"
 }
 
-// Send dispatches a Bubble Tea message to this player's program.
+// Send queues a Bubble Tea message for this player's program without
+// blocking. If the client has fallen too far behind, the message is dropped.
 func (p *Player) Send(msg tea.Msg) {
-	if p.program != nil {
-		p.program.Send(msg)
+	select {
+	case p.out <- msg:
+	default:
+		slog.Debug("dropping message for slow client", "user", p.session.User())
+	}
+}
+
+// forward delivers queued messages to the program until the player leaves.
+// Program.Send blocks until the program is running, which is why it happens
+// here rather than on the room's goroutine.
+func (p *Player) forward() {
+	for {
+		select {
+		case msg := <-p.out:
+			p.program.Send(msg)
+		case <-p.quit:
+			return
+		}
 	}
 }
 
@@ -60,6 +99,7 @@ func (p *Player) WriteString(s string) (int, error) {
 // The caller must NOT hold room.mu.
 func (p *Player) closeOnce() {
 	p.once.Do(func() {
+		close(p.quit)
 		if p.program != nil {
 			p.program.Kill()
 		}
