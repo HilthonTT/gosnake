@@ -135,3 +135,20 @@ func equal(a, b []Point) bool {
 	}
 	return true
 }
+
+func TestSteeringBuffersQuickTurns(t *testing.T) {
+	s := NewSteering(Right)
+
+	// Up then Left between two ticks: Left is only legal after Up.
+	s.Queue(Up)
+	s.Queue(Left)
+	if got := s.Advance(); got != Up {
+		t.Fatalf("first tick = %v, want up", got)
+	}
+	if got := s.Advance(); got != Left {
+		t.Fatalf("second tick = %v, want left", got)
+	}
+	if got := s.Advance(); got != Left {
+		t.Fatalf("third tick = %v, want left (no more turns)", got)
+	}
+}

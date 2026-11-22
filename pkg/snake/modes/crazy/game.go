@@ -21,18 +21,29 @@ type Game struct {
 
 	bombs []*Bomb
 	now   func() time.Time
+
+	// played is game time: it advances by one tick interval per tick, so
+	// bomb timers freeze while the game is paused or waiting to start.
+	played time.Duration
 }
+
+// gameEpoch anchors the game clock; only differences between times matter.
+var gameEpoch = time.Unix(0, 0)
 
 // NewGame starts a crazy game at the given level (1-10).
 func NewGame(level int) (*Game, error) {
-	return newGame(level, time.Now)
+	return newGame(level, nil)
 }
 
+// newGame builds a game whose bombs follow now; a nil now uses game time.
 func newGame(level int, now func() time.Time) (*Game, error) {
 	g := &Game{now: now}
+	if g.now == nil {
+		g.now = func() time.Time { return gameEpoch.Add(g.played) }
+	}
 
 	base, err := single.NewGameWithHooks(level, single.Hooks{
-		BeforeTick: g.updateBombs,
+		BeforeTick: g.beforeTick,
 		IsHazard:   g.isActiveBomb,
 		Occupied:   g.bombPoints,
 		Decorate:   g.drawBombs,
@@ -51,6 +62,12 @@ func newGame(level int, now func() time.Time) (*Game, error) {
 
 // Bombs returns the bombs currently on the board.
 func (g *Game) Bombs() []*Bomb { return g.bombs }
+
+// beforeTick advances the game clock by one tick, then updates the bombs.
+func (g *Game) beforeTick() {
+	g.played += g.GetTickInterval()
+	g.updateBombs()
+}
 
 // updateBombs advances every bomb's state machine and adds bombs when the
 // level rises.

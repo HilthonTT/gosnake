@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,11 +16,12 @@ import (
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/server"
-	"github.com/HilthonTT/gosnake/internal/tipsapi"
 	"github.com/HilthonTT/gosnake/internal/telemetry"
+	"github.com/HilthonTT/gosnake/internal/tipsapi"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/starter"
 	"github.com/HilthonTT/gosnake/internal/tui/views"
+	"github.com/HilthonTT/gosnake/pkg/snake"
 )
 
 type MenuCmd struct{}
@@ -44,6 +46,12 @@ func (c *PlayCmd) Run(globals *GlobalVars) error {
 	mode, ok := playerModes[c.GameMode]
 	if !ok {
 		return fmt.Errorf("invalid game mode: %s", c.GameMode)
+	}
+	if c.Level < 1 || c.Level > snake.MaxLevel {
+		return fmt.Errorf("level must be between 1 and %d, got %d", snake.MaxLevel, c.Level)
+	}
+	if strings.TrimSpace(c.Name) == "" {
+		c.Name = "Anonymous"
 	}
 
 	return launchStarter(globals, mode, tui.NewSingleInput(mode, c.Level, c.Name))

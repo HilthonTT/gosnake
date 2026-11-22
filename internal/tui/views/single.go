@@ -16,8 +16,8 @@ import (
 
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
-	"github.com/HilthonTT/gosnake/internal/tipsapi"
 	"github.com/HilthonTT/gosnake/internal/telemetry"
+	"github.com/HilthonTT/gosnake/internal/tipsapi"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
 	"github.com/HilthonTT/gosnake/internal/tui/theme"
@@ -661,8 +661,12 @@ func (m *SingleModel) submitScore() {
 		return
 	}
 
+	name := strings.TrimSpace(m.username)
+	if name == "" {
+		name = "Anonymous" // matches the name the local leaderboard stores
+	}
 	req := tipsapi.SubmitScoreRequest{
-		PlayerName:  m.username,
+		PlayerName:  name,
 		Score:       m.game.Score(),
 		Level:       m.game.Level(),
 		SnakeLength: m.game.SnakeLength(),

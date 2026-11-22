@@ -105,7 +105,7 @@ func (g *Game) ChangeDirection(d snake.Direction) {
 	if g.gameOver || g.paused || !g.playerAlive {
 		return
 	}
-	g.playerSteer.Queue(d)
+	g.playerSteer.Turn(d, len(g.playerBody) == 1)
 }
 
 // TogglePause pauses or resumes the game.

@@ -113,3 +113,34 @@ func feed(t *testing.T, g *Game, at snake.Point) *single.Game {
 	}
 	return g.Game
 }
+
+func TestBombTimersFreezeWhilePaused(t *testing.T) {
+	g, err := NewGame(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Real time passing without ticks (ready screen, pause) must not arm bombs.
+	g.TogglePause()
+	time.Sleep(10 * time.Millisecond)
+	g.TogglePause()
+
+	ticks := int(BombWarningDuration/g.GetTickInterval()) - 1
+	for range ticks {
+		g.updateBombs()
+	}
+	for _, b := range g.Bombs() {
+		if !b.IsWarning() {
+			t.Fatal("bombs armed without game time passing")
+		}
+	}
+
+	for range ticks + 2 {
+		g.beforeTick()
+	}
+	for _, b := range g.Bombs() {
+		if !b.IsActive() {
+			t.Fatal("bombs should arm after the warning period of game time")
+		}
+	}
+}

@@ -88,7 +88,7 @@ func (g *Game) ChangeDirection(playerIndex int, d snake.Direction) {
 		return
 	}
 	if p := g.players[playerIndex]; p.Alive {
-		p.steering.Queue(d)
+		p.steering.Turn(d, len(p.Points) == 1)
 	}
 }
 
