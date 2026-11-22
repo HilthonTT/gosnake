@@ -78,13 +78,13 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore
-        run: dotnet restore Tips.slnx
+        run: dotnet restore tips-api/Tips.slnx
 
       - name: Build
-        run: dotnet build Tips.slnx --no-restore -c Release -warnaserror
+        run: dotnet build tips-api/Tips.slnx --no-restore -c Release -warnaserror
 
       - name: Test
-        run: dotnet test Tips.slnx --no-build -c Release --collect:"XPlat Code Coverage"
+        run: dotnet test tips-api/Tips.slnx --no-build -c Release --collect:"XPlat Code Coverage"
 
   docker:
     name: Docker build (${{ matrix.image }})
@@ -96,7 +96,7 @@ jobs:
           - image: gosnake
             context: .
           - image: tips-api
-            context: Tips.Api
+            context: tips-api/Tips.Api
     steps:
       - uses: actions/checkout@v7
 

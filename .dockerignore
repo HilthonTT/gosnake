@@ -1,8 +1,7 @@
 .git
 .github
-Tips.Api
-Tips.Api.Tests
-assets
+tips-api
+docs
 dist
 bin
 obj

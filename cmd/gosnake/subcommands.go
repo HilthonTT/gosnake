@@ -15,7 +15,7 @@ import (
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
 	"github.com/HilthonTT/gosnake/internal/server"
-	"github.com/HilthonTT/gosnake/internal/services/leaderboard"
+	"github.com/HilthonTT/gosnake/internal/tipsapi"
 	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/starter"
@@ -109,7 +109,7 @@ func newScoreSubmitter(cfg config.Leaderboard) (views.ScoreSubmitter, error) {
 		return nil, nil
 	}
 
-	svc, err := leaderboard.NewLeaderboardService(leaderboard.Options{
+	svc, err := tipsapi.NewLeaderboardService(tipsapi.Options{
 		BaseURL:            cfg.APIURL,
 		InsecureSkipVerify: cfg.InsecureSkipVerify,
 	})

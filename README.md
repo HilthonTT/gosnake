@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="gosnake — eat, grow, survive in your terminal" width="720">
+  <img src="docs/assets/banner.svg" alt="gosnake — eat, grow, survive in your terminal" width="720">
 </p>
 
 <p align="center">
@@ -103,7 +103,7 @@ The game starts once two players have joined. The first person to create a room 
 
 ## Online leaderboard (Tips.Api)
 
-`Tips.Api/` is an ASP.NET Core 10 minimal API that serves:
+`tips-api/` holds an ASP.NET Core 10 minimal API (`Tips.Api`) that serves:
 
 | Endpoint | Description |
 | --- | --- |
@@ -115,7 +115,7 @@ The game starts once two players have joined. The first person to create a room 
 | `GET  /health` | Health check |
 
 ```sh
-dotnet run --project Tips.Api           # http://localhost:5000, Swagger UI at /swagger in Development
+dotnet run --project tips-api/Tips.Api           # http://localhost:5000, Swagger UI at /swagger in Development
 GOSNAKE_API_URL=http://localhost:5000 gosnake
 ```
 
@@ -133,10 +133,11 @@ pkg/snake/               Pure game engine: no I/O, no UI
 internal/tui/            Bubble Tea v2 views: starter (router + crash capture), menu, game, leaderboard
 internal/server/         Wish v2 SSH server: rooms, players, rate limiting
 internal/data/           SQLite (pure-Go modernc driver) leaderboard repository
-internal/services/       HTTP + SSE client for Tips.Api
+internal/tipsapi/        HTTP + SSE client for Tips.Api
 internal/config/         TOML configuration
 internal/telemetry/      Message recorder and crash reports
-Tips.Api/                ASP.NET Core 10 service; Tips.Api.Tests/ holds its xUnit tests
+tips-api/                ASP.NET Core 10 service (Tips.Api) and its xUnit tests
+docs/assets/             Logo, banner and social preview
 ```
 
 The engine (`pkg/snake`) is independent of the UI and the database. Views talk to it through the `snake.GameController` interface, and dependencies such as key bindings and the score submitter are injected into views rather than created inside them.
@@ -146,9 +147,9 @@ The engine (`pkg/snake`) is independent of the UI and the database. Views talk t
 ```sh
 go test -race ./...                     # Go unit + integration tests (includes a real SSH round-trip)
 golangci-lint run                       # lint (config in .golangci.yml)
-dotnet test Tips.slnx                   # Tips.Api tests
+dotnet test tips-api/Tips.slnx          # Tips.Api tests
 docker build -t gosnake .               # SSH server image
-docker build -t tips-api Tips.Api       # API image
+docker build -t tips-api tips-api/Tips.Api  # API image
 ```
 
 CI (`.github/workflows/ci.yml`) runs these checks on every push and pull request:

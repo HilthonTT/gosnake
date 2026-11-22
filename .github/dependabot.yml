@@ -11,7 +11,7 @@ updates:
         patterns: ["golang.org/x/*"]
 
   - package-ecosystem: nuget
-    directories: ["/Tips.Api", "/Tips.Api.Tests"]
+    directories: ["/tips-api/Tips.Api", "/tips-api/Tips.Api.Tests"]
     schedule:
       interval: weekly
     groups:
@@ -21,7 +21,7 @@ updates:
         patterns: ["xunit*", "Microsoft.NET.Test.Sdk", "coverlet.*"]
 
   - package-ecosystem: docker
-    directories: ["/", "/Tips.Api"]
+    directories: ["/", "/tips-api/Tips.Api"]
     schedule:
       interval: weekly
 

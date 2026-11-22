@@ -16,7 +16,7 @@ import (
 
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
-	"github.com/HilthonTT/gosnake/internal/services/leaderboard"
+	"github.com/HilthonTT/gosnake/internal/tipsapi"
 	"github.com/HilthonTT/gosnake/internal/telemetry"
 	"github.com/HilthonTT/gosnake/internal/tui"
 	"github.com/HilthonTT/gosnake/internal/tui/components"
@@ -62,7 +62,7 @@ var modalStyle = theme.Panel.
 
 // ScoreSubmitter sends finished games to the online leaderboard.
 type ScoreSubmitter interface {
-	SubmitScore(ctx context.Context, req leaderboard.SubmitScoreRequest) (leaderboard.LeaderboardEntry, error)
+	SubmitScore(ctx context.Context, req tipsapi.SubmitScoreRequest) (tipsapi.LeaderboardEntry, error)
 }
 
 // SingleDeps are the collaborators a SingleModel needs.
@@ -661,7 +661,7 @@ func (m *SingleModel) submitScore() {
 		return
 	}
 
-	req := leaderboard.SubmitScoreRequest{
+	req := tipsapi.SubmitScoreRequest{
 		PlayerName:  m.username,
 		Score:       m.game.Score(),
 		Level:       m.game.Level(),

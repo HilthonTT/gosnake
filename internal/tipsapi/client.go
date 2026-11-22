@@ -1,5 +1,5 @@
-// Package leaderboard is a client for the Tips.Api online leaderboard.
-package leaderboard
+// Package tipsapi is a client for the Tips.Api online leaderboard.
+package tipsapi
 
 import (
 	"bufio"
