@@ -103,7 +103,7 @@ The game starts once two players have joined. The first person to create a room 
 
 ## Online leaderboard (Tips.Api)
 
-`tips-api/` holds an ASP.NET Core 10 minimal API (`Tips.Api`) that serves:
+`tips-api/` holds an ASP.NET Core 11 minimal API (`Tips.Api`) that serves:
 
 | Endpoint | Description |
 | --- | --- |
@@ -136,7 +136,7 @@ internal/data/           SQLite (pure-Go modernc driver) leaderboard repository
 internal/tipsapi/        HTTP + SSE client for Tips.Api
 internal/config/         TOML configuration
 internal/telemetry/      Message recorder and crash reports
-tips-api/                ASP.NET Core 10 service (Tips.Api) and its xUnit tests
+tips-api/                ASP.NET Core 11 service (Tips.Api) and its xUnit tests
 docs/assets/             Logo, banner and social preview
 ```
 
