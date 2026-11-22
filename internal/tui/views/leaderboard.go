@@ -229,7 +229,7 @@ func (m *LeaderboardModel) View() tea.View {
 
 // chrome renders everything around the table.
 func (m *LeaderboardModel) chrome() (header, footer string) {
-	top := []string{theme.Title.Render("L E A D E R B O A R D"), "", m.tabsView()}
+	top := []string{theme.Wordmark(), theme.Gradient("L E A D E R B O A R D"), "", m.tabsView()}
 	if banner := m.bannerView(); banner != "" {
 		top = append(top, "", banner)
 	}
@@ -285,7 +285,11 @@ func (m *LeaderboardModel) statusView() string {
 	if !m.sort.desc {
 		dir = "↑"
 	}
-	status := fmt.Sprintf("%d entries · sorted by %s %s", len(m.rows), sortColumnNames[m.sort.col], dir)
+	noun := "entries"
+	if len(m.rows) == 1 {
+		noun = "entry"
+	}
+	status := fmt.Sprintf("%d %s · sorted by %s %s", len(m.rows), noun, sortColumnNames[m.sort.col], dir)
 	if q := m.search.Value(); q != "" {
 		status = fmt.Sprintf("%d matching %q · esc to clear", len(m.rows), q)
 	}

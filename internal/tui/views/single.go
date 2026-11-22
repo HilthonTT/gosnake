@@ -38,18 +38,21 @@ const (
 
 // Board pixel colours.
 var (
-	colBoardA   = lipgloss.Color("#142016")
-	colBoardB   = lipgloss.Color("#18261A")
-	colWall     = lipgloss.Color("#34453A")
-	colHead     = lipgloss.Color("#D9F99D")
+	colBoardA   = lipgloss.Color("#101714")
+	colBoardB   = lipgloss.Color("#131C18")
+	colWall     = lipgloss.Color("#26332D")
+	colHead     = lipgloss.Color("#BBF7D0")
 	colFood     = theme.Gold
-	colBomb     = lipgloss.Color("#EF4444")
-	colBombFuse = lipgloss.Color("#9F1239")
-	colAIHead   = lipgloss.Color("#7DD3FC")
-	colAIBody   = lipgloss.Color("#0284C7")
+	colBomb     = lipgloss.Color("#F43F5E")
+	colBombFuse = lipgloss.Color("#881337")
+	colAIHead   = lipgloss.Color("#DDD6FE")
+	colAIBody   = theme.Rival
 
 	// bodyRamp fades the player's body from just behind the head to the tail.
-	bodyRamp = lipgloss.Blend1D(16, theme.Accent, lipgloss.Color("#3F6212"))
+	bodyRamp = lipgloss.Blend1D(16, theme.Accent, lipgloss.Color("#166534"))
+
+	// aiRamp does the same for the AI snake.
+	aiRamp = lipgloss.Blend1D(16, theme.Rival, lipgloss.Color("#4C1D95"))
 )
 
 var sidebarStyle = theme.Panel.
@@ -444,7 +447,7 @@ func (m *SingleModel) boardView(scale components.Scale) string {
 		case snake.CellAIHead:
 			c = colAIHead
 		case snake.CellAIBody:
-			c = colAIBody
+			c = aiRamp[len(aiRamp)/2]
 		}
 		return shade(c)
 	})
@@ -569,10 +572,17 @@ func (m *SingleModel) sidebarView(height int) string {
 		progress = float64(score%snake.PointsPerLevel) / snake.PointsPerLevel
 	}
 
+	name := m.username
+	if name == "" {
+		name = "Anonymous"
+	}
+	badge := theme.Badge.Render(modeBadge(m.mode))
 	lines := []string{
-		theme.Badge.Render(modeBadge(m.mode)),
-		theme.Label.Render(truncate(m.username, w)),
+		theme.Wordmark(),
 		"",
+		badge + " " + theme.Value.Render(truncate(name, w-lipgloss.Width(badge)-1)),
+		"",
+		theme.Section("You", w, theme.Accent),
 		row("Score", theme.Score.Render(fmt.Sprint(score))),
 		row("Best", bestStyle.Render(fmt.Sprint(best))),
 		row("Level", theme.Value.Render(fmt.Sprintf("%d", level))+theme.Hint.Render(fmt.Sprintf("/%d", snake.MaxLevel))),
@@ -588,8 +598,7 @@ func (m *SingleModel) sidebarView(height int) string {
 		}
 		lines = append(lines,
 			"",
-			lipgloss.NewStyle().Foreground(colAIHead).Bold(true).Render("AI ")+
-				lipgloss.NewStyle().Foreground(theme.Border).Render(strings.Repeat("─", w-3)),
+			theme.Section("Rival", w, theme.Rival),
 			row("Score", theme.Score.Render(fmt.Sprint(vs.AIScore()))),
 			row("Length", num(vs.AISnakeLength())),
 			row("Status", status),
@@ -597,7 +606,7 @@ func (m *SingleModel) sidebarView(height int) string {
 	}
 
 	lines = append(lines, "")
-	legend := m.legend()
+	legend := append([]string{theme.Section("Legend", w, theme.Subtle)}, m.legend()...)
 	inner := height - frameH
 	if gap := inner - len(lines) - len(legend); gap > 0 {
 		lines = append(lines, make([]string, gap)...) // push the legend to the bottom

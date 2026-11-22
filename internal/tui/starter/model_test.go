@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/HilthonTT/gosnake/internal/config"
 	"github.com/HilthonTT/gosnake/internal/data"
@@ -123,7 +124,7 @@ func TestViewsRenderInAltScreen(t *testing.T) {
 			if !v.AltScreen {
 				t.Error("view should use the alt screen")
 			}
-			if !strings.Contains(v.Content, tc.want) {
+			if !strings.Contains(ansi.Strip(v.Content), tc.want) {
 				t.Errorf("view does not contain %q", tc.want)
 			}
 		})

@@ -3,6 +3,7 @@
 package theme
 
 import (
+	"image/color"
 	"strconv"
 	"strings"
 
@@ -13,20 +14,21 @@ import (
 // Palette. Plain text is left unstyled so it follows the terminal's own
 // foreground on both light and dark backgrounds.
 var (
-	Accent    = lipgloss.Color("#A3E635") // lime — brand colour, player snake
-	AccentAlt = lipgloss.Color("#2DD4BF") // teal — end stop of the logo gradient
-	AccentDim = lipgloss.Color("#4D7C0F") // deep green
-	Muted     = lipgloss.Color("#9CA3AF") // secondary text
-	Subtle    = lipgloss.Color("#6B7280") // hints, separators
-	Border    = lipgloss.Color("#3F4A3F") // box borders
-	Highlight = lipgloss.Color("#26361C") // selected row background
-	Gold      = lipgloss.Color("#FACC15")
+	Accent    = lipgloss.Color("#4ADE80") // emerald — brand colour, player snake
+	AccentAlt = lipgloss.Color("#22D3EE") // cyan — end stop of the logo gradient
+	AccentDim = lipgloss.Color("#15803D") // deep green
+	Muted     = lipgloss.Color("#A1A1AA") // secondary text
+	Subtle    = lipgloss.Color("#71717A") // hints, separators
+	Border    = lipgloss.Color("#3F3F46") // rules and empty meter cells
+	Highlight = lipgloss.Color("#1E3A2B") // selected row background
+	Gold      = lipgloss.Color("#FBBF24")
 	Silver    = lipgloss.Color("#CBD5E1")
 	Bronze    = lipgloss.Color("#D97706")
-	Danger    = lipgloss.Color("#F43F5E")
-	Warning   = lipgloss.Color("#F59E0B")
+	Danger    = lipgloss.Color("#FB7185")
+	Warning   = lipgloss.Color("#FB923C")
 	Info      = lipgloss.Color("#38BDF8")
-	OnAccent  = lipgloss.Color("#0B1206") // text drawn on an Accent background
+	Rival     = lipgloss.Color("#A78BFA") // violet — the AI opponent
+	OnAccent  = lipgloss.Color("#052E16") // text drawn on an Accent background
 )
 
 // Panel frames a block with horizontal rules only. Vertical box-drawing
@@ -47,7 +49,8 @@ var (
 	Error    = lipgloss.NewStyle().Foreground(Danger).Bold(true)
 	Badge    = lipgloss.NewStyle().Foreground(OnAccent).Background(Accent).Bold(true).Padding(0, 1)
 	Card     = Panel.Padding(1, 2)
-	Subtitle = lipgloss.NewStyle().Foreground(AccentDim).Italic(true)
+	Subtitle = lipgloss.NewStyle().Foreground(Subtle).Italic(true)
+	Heading  = lipgloss.NewStyle().Foreground(Muted).Bold(true)
 )
 
 // NewHelp returns a help model styled to match the palette.
@@ -63,63 +66,57 @@ func NewHelp() help.Model {
 		FullSeparator:  sep,
 		Ellipsis:       sep,
 	}
-	h.ShortSeparator = " • "
+	h.ShortSeparator = " · "
 	return h
 }
 
-// logoPixels spells GOSNAKE in a 4×5 pixel font. Each '#' is drawn as a
-// background-coloured cell rather than a block glyph, so it renders solid in
-// every terminal regardless of font or line height.
-var logoPixels = []string{
-	".###  .##.  .###  #..#  .##.  #..#  ####",
-	"#...  #..#  #...  ##.#  #..#  #.#.  #...",
-	"#.##  #..#  .##.  #.##  ####  ##..  ###.",
-	"#..#  #..#  ...#  #..#  #..#  #.#.  #...",
-	".###  .##.  ###.  #..#  #..#  #..#  ####",
+// Section renders a small-caps heading followed by a rule, filling width
+// columns: "STATS ──────────".
+func Section(title string, width int, c color.Color) string {
+	head := lipgloss.NewStyle().Foreground(c).Bold(true).Render(strings.ToUpper(title))
+	rule := max(width-lipgloss.Width(head)-1, 0)
+	return head + " " + lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat("─", rule))
 }
 
-var (
-	logoLarge = pixelArt(logoPixels)
-	logoSmall = gradient("G O S N A K E")
-)
-
-// LogoWidth is the width of the large logo in columns.
-var LogoWidth = lipgloss.Width(logoLarge)
-
-// Logo returns the gradient logo, or a one-line wordmark when small is set.
-func Logo(small bool) string {
-	if small {
-		return logoSmall
-	}
-	return logoLarge
+// SpaceBetween lays out left and right at opposite ends of width columns.
+func SpaceBetween(width int, left, right string) string {
+	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	return left + strings.Repeat(" ", gap) + right
 }
 
-// pixelArt draws each '#' as a two-column cell along the Accent → AccentAlt
-// gradient; every other rune becomes blank space.
-func pixelArt(rows []string) string {
-	width := 0
-	for _, r := range rows {
-		width = max(width, len(r))
-	}
-	ramp := lipgloss.Blend1D(max(width, 2), Accent, AccentAlt)
-
-	lines := make([]string, len(rows))
-	for i, row := range rows {
-		var sb strings.Builder
-		for col, r := range row {
-			if r == '#' {
-				sb.WriteString(lipgloss.NewStyle().Background(ramp[col]).Render("  "))
-			} else {
-				sb.WriteString("  ")
-			}
+// ProgressBar renders a filled/empty bar of width cells for ratio in [0,1],
+// with the filled part fading along the brand gradient.
+func ProgressBar(width int, ratio float64) string {
+	ratio = min(max(ratio, 0), 1)
+	filled := int(ratio*float64(width) + 0.5)
+	var sb strings.Builder
+	if filled > 0 {
+		ramp := lipgloss.Blend1D(max(width, 2), AccentDim, Accent)
+		for i := range filled {
+			sb.WriteString(lipgloss.NewStyle().Foreground(ramp[i]).Render("━"))
 		}
-		lines[i] = sb.String()
 	}
-	return strings.Join(lines, "\n")
+	sb.WriteString(lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat("━", width-filled)))
+	return sb.String()
 }
 
-// gradient colours each column of s along the Accent → AccentAlt gradient.
-func gradient(s string) string {
+// Meter renders n segments with the first filled ones lit along the brand
+// gradient, e.g. "▰▰▰▱▱▱".
+func Meter(n, filled int) string {
+	ramp := lipgloss.Blend1D(max(n, 2), Accent, AccentAlt)
+	var sb strings.Builder
+	for i := range n {
+		if i < filled {
+			sb.WriteString(lipgloss.NewStyle().Foreground(ramp[i]).Render("▰"))
+		} else {
+			sb.WriteString(lipgloss.NewStyle().Foreground(Border).Render("▱"))
+		}
+	}
+	return sb.String()
+}
+
+// Gradient colours each column of s along the Accent → AccentAlt gradient.
+func Gradient(s string) string {
 	ramp := lipgloss.Blend1D(max(lipgloss.Width(s), 2), Accent, AccentAlt)
 
 	var sb strings.Builder
@@ -131,20 +128,6 @@ func gradient(s string) string {
 		sb.WriteString(lipgloss.NewStyle().Foreground(ramp[col]).Bold(true).Render(string(r)))
 	}
 	return sb.String()
-}
-
-// SpaceBetween lays out left and right at opposite ends of width columns.
-func SpaceBetween(width int, left, right string) string {
-	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
-	return left + strings.Repeat(" ", gap) + right
-}
-
-// ProgressBar renders a filled/empty bar of width cells for ratio in [0,1].
-func ProgressBar(width int, ratio float64) string {
-	ratio = min(max(ratio, 0), 1)
-	filled := int(ratio*float64(width) + 0.5)
-	return lipgloss.NewStyle().Foreground(Accent).Render(strings.Repeat("━", filled)) +
-		lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat("━", width-filled))
 }
 
 // TooSmall is shown in place of a screen that does not fit the terminal.
